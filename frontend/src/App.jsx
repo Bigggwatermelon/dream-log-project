@@ -17,7 +17,7 @@ export default function App() {
   const fetchDreams = async () => {
     try {
       // 注意：這裡預設連線到 localhost:5000
-      const res = await axios.get('http://127.0.0.1:5000/api/dreams');
+      const res = await axios.get('https://dream-backend-dinx.onrender.com/api/dreams');
       setDreams(res.data);
       updateChart(res.data);
     } catch(e) {
@@ -43,7 +43,7 @@ export default function App() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      await axios.post('http://127.0.0.1:5000/api/dreams', { content, mood_level: mood });
+      await axios.post('https://dream-backend-dinx.onrender.com/api/dreams', { content, mood_level: mood });
       setContent('');
       setView('dashboard');
       fetchDreams();
