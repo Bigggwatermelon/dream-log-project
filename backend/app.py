@@ -62,7 +62,13 @@ def analyze_dream_with_ai(text):
             return result_text, ["夢境", "潛意識"], 3
 
     except Exception as e:
-        print(f"AI 發生錯誤: {e}")
+        # 在終端機印出具體錯誤，方便除錯
+        print(f"詳細錯誤訊息: {type(e).__name__}: {e}") 
+        
+        # 針對安全性問題做特殊處理 (選用)
+        if "ValueError" in str(type(e).__name__) and "content" in str(e):
+            return "夢境內容可能涉及敏感話題，AI 無法分析。", ["內容過濾"], 3
+            
         return "AI 目前有點累，請稍後再試。", ["連線忙碌"], 3
 
 # --- 路由設定 ---
