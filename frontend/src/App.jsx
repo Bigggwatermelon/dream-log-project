@@ -131,10 +131,18 @@ export default function App() {
                     情緒: {d.mood_level}
                   </span>
                 </div>
+                {/* 你的夢境 */}
                 <p className="text-slate-200 text-lg mb-4">{d.content}</p>
-                <div className="flex gap-2 border-t border-slate-700 pt-4">
+                
+                {/* 🌟 新增：顯示 AI 的分析建議 (原本沒顯示) */}
+                <div className="bg-slate-700/50 p-4 rounded-xl mb-4 text-purple-200 text-sm italic border-l-4 border-purple-500">
+                    🤖 AI 解析：{d.analysis}
+                </div>
+
+                <div className="flex gap-2 border-t border-slate-700 pt-4 flex-wrap">
                   <span className="text-xs text-slate-500 py-1">AI 關鍵字:</span>
-                  {d.analysis.keywords.map((k,i)=>(
+                  {/* 🔧 修正點：直接讀取 d.keywords，並加上保護機制 (|| []) 避免當機 */}
+                  {(d.keywords || []).map((k,i)=>(
                     <span key={i} className="text-xs bg-slate-700 text-purple-300 px-3 py-1 rounded-full border border-slate-600">
                       #{k}
                     </span>
