@@ -26,7 +26,7 @@ def analyze_dream_with_ai(text):
 
     try:
         # 使用最新的 Gemini 1.5 Flash 模型 (速度快、免費)
-        model = genai.GenerativeModel('gemini-pro')
+        model = genai.GenerativeModel('gemini-1.5-flash')
         
         # 1. 產生分析 (給 AI 的指令)
         prompt = f"""
