@@ -1,102 +1,143 @@
 import os
+import datetime
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from datetime import datetime
 import google.generativeai as genai
-import random
+import psycopg2
 
 app = Flask(__name__)
 CORS(app)
 
-# --- 設定 AI 鑰匙 ---
-# 我們從環境變數抓取鑰匙，這樣最安全，不會把密碼外洩到 GitHub
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+# 設定 Google AI (使用環境變數)
+GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY')
+if not GOOGLE_API_KEY:
+    # 如果本地沒有環境變數，試著讀取 Render 設定的
+    pass 
+else:
+    genai.configure(api_key=GOOGLE_API_KEY)
 
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
+# 設定模型 (使用最穩定的 Flash-001)
+model = genai.GenerativeModel('gemini-1.5-flash-001')
 
-# 模擬資料庫 (暫存用，重開機後會清空)
-mock_db = []
+# 取得資料庫連線網址
+DATABASE_URL = os.environ.get('DATABASE_URL')
 
-# --- 核心：AI 解夢函式 ---
-def analyze_dream_with_ai(text):
-    # 如果沒有鑰匙，就回傳錯誤訊息
-    if not GEMINI_API_KEY:
-        return "系統未設定 AI Key，無法分析。", ["系統錯誤"], 3
-
+# --- 資料庫連線小幫手 ---
+def get_db_connection():
+    if not DATABASE_URL:
+        print("❌ 錯誤：找不到 DATABASE_URL，請確認 Render 環境變數設定正確")
+        return None
     try:
-        # 使用最新的 Gemini 1.5 Flash 模型 (速度快、免費)
-        model = genai.GenerativeModel('gemini-1.5-flash-001')
-        
-        # 1. 產生分析 (給 AI 的指令)
-        prompt = f"""
-        你是一位溫暖且專業的心理諮商師。
-        使用者輸入了夢境：『{text}』
-        
-        請完成以下任務：
-        1. 用繁體中文給予 100 字以內的心理分析與建議，語氣要溫柔。
-        2. 從夢境中提取 3 個關鍵詞。
-        3. 評估這個夢的情緒指數 (1=非常負面, 5=非常正面)，只要給一個數字。
-        
-        請用以下格式回傳：
-        分析內容|關鍵詞1,關鍵詞2,關鍵詞3|情緒分數
-        """
-        
-        response = model.generate_content(prompt)
-        result_text = response.text.strip()
-
-        # 簡單處理 AI 回傳的格式 (用 | 切割)
-        parts = result_text.split('|')
-        
-        if len(parts) >= 3:
-            analysis = parts[0]
-            keywords = parts[1].split(',')
-            # 嘗試把分數轉成數字，失敗就預設 3
-            try:
-                sentiment = int(parts[2].strip())
-            except:
-                sentiment = 3
-            return analysis, keywords, sentiment
-        else:
-            # 萬一 AI 格式亂掉，至少回傳文字
-            return result_text, ["夢境", "潛意識"], 3
-
+        conn = psycopg2.connect(DATABASE_URL)
+        return conn
     except Exception as e:
-        # 在終端機印出具體錯誤，方便除錯
-        print(f"詳細錯誤訊息: {type(e).__name__}: {e}") 
-        
-        # 針對安全性問題做特殊處理 (選用)
-        if "ValueError" in str(type(e).__name__) and "content" in str(e):
-            return "夢境內容可能涉及敏感話題，AI 無法分析。", ["內容過濾"], 3
-            
-        return "AI 目前有點累，請稍後再試。", ["連線忙碌"], 3
+        print(f"❌ 資料庫連線失敗: {e}")
+        return None
 
-# --- 路由設定 ---
+# --- 初始化資料庫 (第一次跑的時候建立表格) ---
+def init_db():
+    conn = get_db_connection()
+    if conn:
+        try:
+            cur = conn.cursor()
+            # 建立表格：如果不存在才建立
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS dreams (
+                    id SERIAL PRIMARY KEY,
+                    date TEXT,
+                    content TEXT,
+                    mood_level INTEGER,
+                    analysis TEXT,
+                    keywords TEXT[]
+                );
+            ''')
+            conn.commit()
+            cur.close()
+            conn.close()
+            print("✅ 資料庫表格初始化成功！")
+        except Exception as e:
+            print(f"❌ 初始化表格失敗: {e}")
+
+# 程式啟動時，先檢查表格有沒有建好
+with app.app_context():
+    init_db()
 
 @app.route('/api/dreams', methods=['GET'])
 def get_dreams():
-    return jsonify(sorted(mock_db, key=lambda x: x['date'], reverse=True))
+    conn = get_db_connection()
+    if not conn:
+        return jsonify([]), 500
+    
+    cur = conn.cursor()
+    # 撈取所有資料，按照 ID 倒序排列 (最新的在上面)
+    cur.execute('SELECT * FROM dreams ORDER BY id DESC;')
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    # 把資料庫的格式 (Tuple) 轉成前端要的 (Dictionary)
+    dreams_list = []
+    for row in rows:
+        dreams_list.append({
+            'id': row[0],
+            'date': row[1],
+            'content': row[2],
+            'mood_level': row[3],
+            'analysis': row[4],
+            'keywords': row[5]  # Postgres 陣列直接對應 Python List
+        })
+        
+    return jsonify(dreams_list)
 
 @app.route('/api/dreams', methods=['POST'])
 def add_dream():
     data = request.json
-    content = data.get('content', '')
-    
-    # 呼叫上面的 AI 函式
-    analysis_result, keywords, sentiment = analyze_dream_with_ai(content)
+    content = data.get('content')
+    mood_level = data.get('mood_level', 3)
+    date_str = datetime.datetime.now().strftime("%Y-%m-%d")
 
-    new_data = {
-        "id": len(mock_db) + 1,
-        "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
-        "content": content,
-        # 如果使用者有手動拉拉桿，就用手動的，不然就用 AI 判斷的
-        "mood_level": data.get('mood_level', sentiment), 
-        "analysis": analysis_result,
-        "keywords": keywords
-    }
+    # 1. 呼叫 AI 分析
+    analysis_text = "AI 休息中..."
+    keywords = ["未分析"]
     
-    mock_db.append(new_data)
-    return jsonify(new_data), 201
+    try:
+        prompt = f"請分析這個夢境：『{content}』。1. 給予一段簡短的心理分析建議(50字內)。2. 給出3個情緒關鍵字。格式範例：分析建議|關鍵字1,關鍵字2,關鍵字3"
+        response = model.generate_content(prompt)
+        if response.text:
+            parts = response.text.split('|')
+            if len(parts) >= 2:
+                analysis_text = parts[0].strip()
+                keywords = [k.strip() for k in parts[1].split(',')]
+            else:
+                analysis_text = response.text
+    except Exception as e:
+        print(f"AI Error: {e}")
+
+    # 2. 存入資料庫 (PostgreSQL)
+    conn = get_db_connection()
+    if conn:
+        cur = conn.cursor()
+        cur.execute(
+            'INSERT INTO dreams (date, content, mood_level, analysis, keywords) VALUES (%s, %s, %s, %s, %s) RETURNING id;',
+            (date_str, content, mood_level, analysis_text, keywords)
+        )
+        new_id = cur.fetchone()[0]
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        # 回傳剛剛存好的那一筆
+        new_dream = {
+            'id': new_id,
+            'date': date_str,
+            'content': content,
+            'mood_level': mood_level,
+            'analysis': analysis_text,
+            'keywords': keywords
+        }
+        return jsonify(new_dream), 201
+    else:
+        return jsonify({"error": "Database connection failed"}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(host='0.0.0.0', port=5000)
