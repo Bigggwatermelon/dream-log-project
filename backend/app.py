@@ -34,7 +34,7 @@ import google.generativeai as genai
 GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY')
 if GOOGLE_API_KEY:
     genai.configure(api_key=GOOGLE_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash-001')
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 # --- 資料庫連線 ---
 DATABASE_URL = os.environ.get('DATABASE_URL')
