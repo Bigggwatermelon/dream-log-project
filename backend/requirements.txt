@@ -1,7 +1,8 @@
 flask
 flask-cors
-google-generativeai>=0.8.3
+google-generativeai
 psycopg2-binary
 gunicorn
 flask-bcrypt
 flask-jwt-extended
+requests
