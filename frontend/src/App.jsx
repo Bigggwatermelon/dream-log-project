@@ -17,6 +17,7 @@ export default function App() {
   // 資料狀態
   const [dreams, setDreams] = useState([]);
   const [libraryDreams, setLibraryDreams] = useState([]);
+  const [expandedId, setExpandedId] = useState(null); // ✨ 新增：用來記錄圖書館中哪個夢境被展開了
   
   // 表單狀態
   const [form, setForm] = useState({ content: '', mood: 3, reality: '', isPublic: false, isAnon: false });
@@ -62,8 +63,6 @@ export default function App() {
   // 3. 新增夢境 (除錯版)
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
-    // 🔍 檢查點 1：Token 到底有沒有？
     console.log("準備發送 Token:", token);
     if (!token) {
         alert("❌ 錯誤：沒有 Token！請先登入。");
@@ -84,14 +83,11 @@ export default function App() {
         } 
       });
       
-      console.log("伺服器回應:", res.data);
       setForm({ content: '', mood: 3, reality: '', isPublic: false, isAnon: false });
       alert("✅ 成功：" + (res.data.msg || "AI 解析完成並存檔！"));
       fetchDreams('personal');
       
     } catch (e) { 
-        console.error("發送失敗:", e);
-        // 🔍 檢查點 2：後端到底罵了什麼？
         const errorMsg = e.response?.data?.msg || e.message;
         alert("❌ 儲存失敗：" + errorMsg); 
     }
@@ -109,7 +105,6 @@ export default function App() {
     if (view === 'library') fetchDreams('library');
   }, [view]);
 
-  // --- 畫面渲染 ---
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 font-sans p-4 md:p-8">
       <div className="max-w-6xl mx-auto">
@@ -135,7 +130,7 @@ export default function App() {
           </div>
         </nav>
 
-        {/* 1. 首頁 / 登入 / 註冊 */}
+        {/* 1. 登入註冊頁面 */}
         {['home', 'login', 'register'].includes(view) && !token && (
           <div className="max-w-md mx-auto mt-20 bg-slate-800 p-8 rounded-3xl border border-slate-700 shadow-2xl">
             {view === 'home' && (
@@ -147,7 +142,7 @@ export default function App() {
               </div>
             )}
             {(view === 'login' || view === 'register') && (
-              <div className="animate-fade-in">
+              <div>
                 <h2 className="text-2xl font-bold mb-6 text-center">{view === 'login' ? '登入帳號' : '註冊新帳號'}</h2>
                 <input className="w-full bg-slate-900 p-3 rounded-lg mb-4 border border-slate-700" placeholder="帳號" 
                   value={authForm.username} onChange={e => setAuthForm({...authForm, username: e.target.value})} />
@@ -164,20 +159,17 @@ export default function App() {
           </div>
         )}
 
-        {/* 2. 個人儀表板 (Dashboard) */}
+        {/* 2. 個人儀表板 */}
         {view === 'dashboard' && token && (
           <div className="grid md:grid-cols-3 gap-8">
-            {/* 左側：寫日記 */}
             <div className="md:col-span-1 bg-slate-800 p-6 rounded-3xl border border-slate-700 h-fit">
               <h3 className="text-xl font-bold mb-4 flex gap-2"><PenTool/> 新增紀錄</h3>
               <textarea className="w-full bg-slate-900 p-3 rounded-xl mb-3 h-32 text-white" placeholder="昨晚夢到了什麼..." value={form.content} onChange={e=>setForm({...form, content:e.target.value})} />
-              <textarea className="w-full bg-slate-900 p-3 rounded-xl mb-4 h-20 text-sm text-slate-300" placeholder="現實連結：昨天發生了什麼特別的事？(壓力源、電影...)" value={form.reality} onChange={e=>setForm({...form, reality:e.target.value})} />
-              
+              <textarea className="w-full bg-slate-900 p-3 rounded-xl mb-4 h-20 text-sm text-slate-300" placeholder="現實連結..." value={form.reality} onChange={e=>setForm({...form, reality:e.target.value})} />
               <div className="mb-4">
                 <label className="text-sm text-slate-400">情緒指數: {form.mood}</label>
                 <input type="range" min="1" max="5" className="w-full accent-purple-500" value={form.mood} onChange={e=>setForm({...form, mood:Number(e.target.value)})}/>
               </div>
-              
               <div className="flex gap-4 mb-6">
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
                   <input type="checkbox" checked={form.isPublic} onChange={e=>setForm({...form, isPublic:e.target.checked})} className="accent-pink-500"/> 公開分享
@@ -191,9 +183,7 @@ export default function App() {
               <button onClick={handleSubmit} className="w-full bg-gradient-to-r from-purple-600 to-pink-600 py-3 rounded-xl font-bold">✨ AI 解析並儲存</button>
             </div>
 
-            {/* 右側：圖表與列表 */}
             <div className="md:col-span-2 space-y-6">
-              {/* 圖表 */}
               <div className="bg-slate-800 p-6 rounded-3xl border border-slate-700 h-64">
                 <Line options={{maintainAspectRatio:false, scales:{y:{grid:{color:'#334155'}}, x:{grid:{color:'#334155'}}}}} 
                   data={{
@@ -201,19 +191,14 @@ export default function App() {
                     datasets: [{ label: '情緒趨勢', data: dreams.map(d => d.mood_level).reverse(), borderColor: '#a855f7', tension: 0.4 }]
                   }} />
               </div>
-              {/* 列表 */}
               <div className="space-y-4">
                 {dreams.map(d => (
-                  <div key={d.id} className="bg-slate-800 p-5 rounded-2xl border border-slate-700 relative overflow-hidden group">
+                  <div key={d.id} className="bg-slate-800 p-5 rounded-2xl border border-slate-700">
                     <div className="flex justify-between mb-2">
                        <span className="text-xs text-slate-400">{d.date}</span>
-                       <div className="flex gap-2">
-                         {d.is_public && <span className="bg-pink-900/50 text-pink-300 text-xs px-2 py-1 rounded">公開</span>}
-                         <span className={`text-xs px-2 py-1 rounded ${d.mood_level>=3?'bg-green-900/50 text-green-300':'bg-red-900/50 text-red-300'}`}>Mood: {d.mood_level}</span>
-                       </div>
+                       <span className={`text-xs px-2 py-1 rounded ${d.mood_level>=3?'bg-green-900/50 text-green-300':'bg-red-900/50 text-red-300'}`}>Mood: {d.mood_level}</span>
                     </div>
                     <p className="mb-3 text-lg">{d.content}</p>
-                    {d.reality_context && <p className="text-xs text-slate-500 mb-2 border-l-2 border-slate-600 pl-2">🔗 現實：{d.reality_context}</p>}
                     <div className="bg-slate-700/30 p-3 rounded-lg text-sm text-purple-200 border-l-4 border-purple-500">🤖 {d.analysis}</div>
                   </div>
                 ))}
@@ -222,7 +207,7 @@ export default function App() {
           </div>
         )}
 
-        {/* 3. 夢境圖書館 (Library) */}
+        {/* 3. 夢境圖書館 ✨ 更新部分 */}
         {view === 'library' && (
           <div>
             <div className="text-center mb-10">
@@ -231,17 +216,34 @@ export default function App() {
             </div>
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
               {libraryDreams.map(d => (
-                <div key={d.id} className="bg-slate-800 p-6 rounded-2xl border border-slate-700 hover:border-pink-500/50 transition-all hover:-translate-y-1 shadow-lg">
+                <div key={d.id} className="bg-slate-800 p-6 rounded-2xl border border-slate-700 shadow-lg flex flex-col">
                   <div className="flex items-center gap-2 mb-4 pb-3 border-b border-slate-700">
                     <div className="bg-slate-700 p-2 rounded-full"><User size={16}/></div>
                     <span className="font-bold text-slate-300">{d.author}</span>
                     <span className="ml-auto text-xs text-slate-500">{d.date}</span>
                   </div>
-                  <p className="text-slate-200 mb-4 line-clamp-3">{d.content}</p>
-                  <div className="flex flex-wrap gap-2 mb-4">
-                    {(d.keywords || []).map((k,i) => <span key={i} className="text-xs bg-slate-900 text-pink-300 px-2 py-1 rounded-full">#{k}</span>)}
+                  
+                  {/* ✨ 文字內容：根據狀態切換 line-clamp-3 (只顯示三行) 或展開 */}
+                  <p className={`text-slate-200 mb-2 leading-relaxed ${expandedId === d.id ? '' : 'line-clamp-3'}`}>
+                    {d.content}
+                  </p>
+
+                  {/* ✨ 如果字數夠多，才顯示「閱讀全文」按鈕 */}
+                  {d.content.length > 50 && (
+                    <button 
+                      onClick={() => setExpandedId(expandedId === d.id ? null : d.id)}
+                      className="text-pink-400 hover:text-pink-300 text-sm font-medium mb-4 text-left"
+                    >
+                      {expandedId === d.id ? "收起全文 ↑" : "閱讀全文 ..."}
+                    </button>
+                  )}
+
+                  <div className="mt-auto">
+                    <div className="flex flex-wrap gap-2 mb-4">
+                      {(d.keywords || []).map((k,i) => <span key={i} className="text-xs bg-slate-900 text-pink-300 px-2 py-1 rounded-full">#{k}</span>)}
+                    </div>
+                    <div className="text-xs text-purple-300 bg-slate-700/30 p-3 rounded-lg">🤖 {d.analysis}</div>
                   </div>
-                  <div className="text-xs text-purple-300 bg-slate-700/30 p-3 rounded-lg">🤖 {d.analysis}</div>
                 </div>
               ))}
             </div>
