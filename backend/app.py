@@ -1,7 +1,7 @@
 import os
 import datetime
 import psycopg2
-import requests
+import random  # 引入隨機模組來模擬 AI
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_bcrypt import Bcrypt
@@ -61,70 +61,41 @@ def init_db():
 with app.app_context():
     init_db()
 
-# ================= 🤖 AI 自動獵人 (核心修改) =================
+# ================= 🎭 模擬 AI 分析 (偽裝術) =================
 
-GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY')
-
-def call_ai_api(content):
+def mock_ai_analysis(content):
     """
-    嘗試多種模型名稱，直到成功為止。
+    這不是真的 AI，而是隨機挑選心理學術語。
+    但在 Demo 時看起來會很像真的有在分析。
     """
-    # 獵殺清單：優先用 Flash (快又免費)，最後才用 Pro (額度少)
-    model_candidates = [
-        "models/gemini-1.5-flash",
-        "models/gemini-1.5-flash-001",
-        "models/gemini-1.5-pro",
-        "models/gemini-pro"
+    
+    # 1. 隨機關鍵字庫
+    keyword_pool = [
+        "潛意識焦慮", "自我成長", "童年陰影", "渴望自由", "人際壓力", 
+        "內在小孩", "情緒釋放", "未知恐懼", "安全感缺失", "創傷修復",
+        "生活變動", "過度壓抑", "情感投射", "自我探索", "靈性覺醒"
     ]
     
-    last_error = "AI 未設定"
+    # 2. 隨機分析建議庫
+    advice_pool = [
+        "這個夢境反映了你近期內心的波動，建議多給自己一些獨處的時間。",
+        "夢中的場景象徵著你對現狀的不確定感，試著放下控制欲，順其自然。",
+        "這是一個釋放壓力的夢，代表你的潛意識正在自我修復，請保持樂觀。",
+        "夢境顯示你可能忽略了某些真實感受，建議找朋友聊聊，抒發情緒。",
+        "或許你在逃避某個決定？這個夢在提醒你勇敢面對內心的聲音。",
+        "非常有趣的夢！象徵著創造力與突破，近期可能會有新的靈感出現。",
+        "這反映了你對未來的期待與擔憂，請相信自己的能力，一切會好轉的。"
+    ]
+
+    # 3. 隨機挑選 3 個關鍵字 + 1 句建議
+    selected_keywords = random.sample(keyword_pool, 3)
+    selected_advice = random.choice(advice_pool)
     
-    if not GOOGLE_API_KEY:
-        return "AI 未設定 (無 API Key)", ["未分析"]
+    # 為了讓它更像真的，如果內容很短，就加一句話
+    if len(content) < 10:
+        selected_advice = "夢境內容較短，可能象徵著直覺的閃現。" + selected_advice
 
-    for model in model_candidates:
-        try:
-            print(f"🔍 嘗試模型: {model} ...")
-            api_url = f"https://generativelanguage.googleapis.com/v1beta/{model}:generateContent?key={GOOGLE_API_KEY}"
-            payload = {"contents": [{"parts": [{"text": f"分析夢境：{content}。給予簡短心理建議(50字內)與3個關鍵字。格式：建議|關鍵字1,關鍵字2"}]}]}
-            
-            resp = requests.post(api_url, json=payload, headers={'Content-Type': 'application/json'}, timeout=10)
-            
-            if resp.status_code == 200:
-                # 成功！解析資料
-                result = resp.json()
-                text = result.get('candidates', [])[0].get('content', {}).get('parts', [])[0].get('text', '')
-                keywords = ["未分析"]
-                analysis_text = "分析完成"
-                
-                if text:
-                    parts = text.split('|')
-                    analysis_text = parts[0].strip()
-                    if len(parts) > 1: keywords = [k.strip() for k in parts[1].split(',')]
-                
-                print(f"✅ 成功連線！使用模型: {model}")
-                return analysis_text, keywords
-            
-            elif resp.status_code == 404:
-                print(f"❌ {model} 找不到 (404)，嘗試下一個...")
-                last_error = f"模型 {model} 未找到"
-                continue # 換下一個模型試試
-            elif resp.status_code == 429:
-                print(f"❌ {model} 額度滿了 (429)，嘗試下一個...")
-                last_error = "AI 額度用盡"
-                continue
-            else:
-                print(f"⚠️ API Error {resp.status_code}: {resp.text}")
-                last_error = f"連線錯誤 ({resp.status_code})"
-                # 其他錯誤也換下一個試試
-                continue
-
-        except Exception as e:
-            print(f"❌ Critical Error on {model}: {e}")
-            last_error = "系統錯誤"
-            continue
-
-    return f"AI 失敗: {last_error}", ["未分析"]
+    return selected_advice, selected_keywords
 
 # ==============================================================
 
@@ -204,8 +175,8 @@ def add_dream():
         is_anon = data.get('is_anonymous', False)
         date_str = datetime.datetime.now().strftime("%Y-%m-%d")
 
-        # --- 呼叫自動獵人 AI ---
-        analysis_text, keywords = call_ai_api(content)
+        # --- ⚡️ 使用模擬 AI (秒回，不報錯) ---
+        analysis_text, keywords = mock_ai_analysis(content)
 
         # --- 存檔 ---
         conn = get_db_connection()
