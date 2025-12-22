@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Line, Radar } from 'react-chartjs-2';
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, RadialLinearScale } from 'chart.js';
-import { BookOpen, PenTool, Globe, User, Trash2, Heart, Search, Calendar as CalIcon, Smile, Frown, Meh, RefreshCw, Settings, LogOut, Database, UserCircle, Tag, Eye } from 'lucide-react';
+import { BookOpen, PenTool, Globe, User, Trash2, Heart, Search, Calendar as CalIcon, Smile, Frown, Meh, RefreshCw, Settings, LogOut, Database, UserCircle, Tag, Eye, Zap } from 'lucide-react';
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
 import { format } from 'date-fns';
@@ -23,9 +23,19 @@ const calendarStyles = `
 `;
 
 const parseDreamData = (analysisStr) => {
+    if (!analysisStr) return { text: "分析中...", radarData: [50, 50, 50, 50, 50] };
     const parts = analysisStr.split('||RADAR:');
     return { text: parts[0], radarData: parts.length > 1 ? parts[1].split(',').map(Number) : [50, 50, 50, 50, 50] };
 };
+
+// ✨ 測試資料庫 (用來一鍵生成)
+const DEMO_DATA = [
+    { content: "我夢到我在考試，可是試卷上的字我都看不懂，時間快到了，我非常焦慮，一直在流汗。", mood: 1, reality: "最近期末考壓力大" },
+    { content: "我夢見我變成了一隻鳥，在天空飛翔，下面的大海非常藍，感覺超級自由，完全沒有煩惱。", mood: 5, reality: "剛看完一部旅遊電影" },
+    { content: "夢到被一隻巨大的黑狗追，我一直跑一直跑，最後躲進一個洞穴裡，裡面有一條蛇。", mood: 2, reality: "昨天被老闆罵" },
+    { content: "夢到過世的奶奶煮飯給我吃，味道很懷念，我們聊了很多小時候的事情，醒來時眼角有淚。", mood: 3, reality: "中秋節快到了" },
+    { content: "夢到我在海邊撿貝殼，突然海水漲潮，我差點被淹沒，這時候有一隻貓把我叫醒了。", mood: 4, reality: "想去海邊玩" }
+];
 
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem('token'));
@@ -40,7 +50,6 @@ export default function App() {
   const [showSavedOnly, setShowSavedOnly] = useState(false);
   
   const [selectedDate, setSelectedDate] = useState(new Date());
-  // ✨ 新增狀態：是否忽略日期篩選（顯示全部）
   const [showAllDates, setShowAllDates] = useState(true);
 
   const [form, setForm] = useState({ content: '', mood: 3, reality: '', isPublic: false, isAnon: false });
@@ -86,7 +95,7 @@ export default function App() {
       }, { headers: { 'Authorization': `Bearer ${token}` } });
       setForm({ content: '', mood: 3, reality: '', isPublic: false, isAnon: false });
       alert("✅ 分析完成！"); fetchDreams('personal');
-      setShowAllDates(true); // 存檔後自動顯示最新列表
+      setShowAllDates(true);
     } catch (e) { alert("失敗"); }
   };
 
@@ -101,6 +110,29 @@ export default function App() {
     try { await axios.delete(`${API_URL}/users/clear_data`, { headers: { Authorization: `Bearer ${token}` } }); alert("已清除"); fetchDreams('personal'); } catch (e) { alert("失敗"); }
   };
 
+  // ✨ 新功能：一鍵生成測試資料
+  const handleGenerateDemoData = async () => {
+      if (!window.confirm("這將會自動新增 5 篇測試用的夢境日記，確定嗎？")) return;
+      try {
+          // 迴圈發送請求
+          for (const demo of DEMO_DATA) {
+              await axios.post(`${API_URL}/dreams`, {
+                  content: demo.content,
+                  mood_level: demo.mood,
+                  reality_context: demo.reality,
+                  is_public: true, // 預設公開，這樣圖書館也有資料
+                  is_anonymous: false
+              }, { headers: { 'Authorization': `Bearer ${token}` } });
+          }
+          alert("✅ 成功生成 5 篇日記！請查看儀表板與圖書館。");
+          fetchDreams('personal');
+          setView('dashboard');
+          setShowAllDates(true);
+      } catch (e) {
+          alert("生成失敗，可能是網路問題");
+      }
+  };
+
   const toggleSave = async (id) => {
     if (!token) return alert("請先登入");
     const res = await axios.post(`${API_URL}/dreams/${id}/save`, {}, { headers: { Authorization: `Bearer ${token}` } });
@@ -110,7 +142,6 @@ export default function App() {
   useEffect(() => { if (token) { fetchDreams('personal'); setView('dashboard'); } }, []);
   useEffect(() => { if (view === 'library') fetchDreams('library'); }, [view, showSavedOnly, moodFilter]);
 
-  // ✨ 關鍵修正：列表篩選邏輯
   const filteredPersonalDreams = showAllDates 
     ? dreams 
     : dreams.filter(d => d.date === format(selectedDate, 'yyyy-MM-dd'));
@@ -118,10 +149,9 @@ export default function App() {
   const latestDream = dreams.length > 0 ? dreams[0] : null;
   const latestRadarData = latestDream ? parseDreamData(latestDream.analysis).radarData : [50, 50, 50, 50, 50];
 
-  // ✨ 計算文字雲數據
   const allKeywords = dreams.flatMap(d => d.keywords || []);
   const keywordCounts = allKeywords.reduce((acc, curr) => { acc[curr] = (acc[curr] || 0) + 1; return acc; }, {});
-  const sortedKeywords = Object.entries(keywordCounts).sort((a, b) => b[1] - a[1]).slice(0, 10); // 取前10名
+  const sortedKeywords = Object.entries(keywordCounts).sort((a, b) => b[1] - a[1]).slice(0, 10);
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 font-sans p-4 md:p-8">
@@ -199,21 +229,26 @@ export default function App() {
                 </div>
               </div>
               
-              {/* ✨ 新增：文字雲 (Word Cloud) */}
-              {sortedKeywords.length > 0 && (
-                  <div className="bg-slate-800 p-4 rounded-3xl border border-slate-700">
-                      <h4 className="text-slate-400 text-sm mb-3 flex items-center gap-2"><Tag size={14}/> 你的夢境關鍵字</h4>
+              {/* ✨ 文字雲 (修正版：無資料時顯示提示) */}
+              <div className="bg-slate-800 p-4 rounded-3xl border border-slate-700">
+                  <h4 className="text-slate-400 text-sm mb-3 flex items-center gap-2"><Tag size={14}/> 你的夢境關鍵字雲</h4>
+                  {sortedKeywords.length > 0 ? (
                       <div className="flex flex-wrap gap-3 items-end">
                           {sortedKeywords.map(([word, count], idx) => {
                               const sizes = ["text-xs", "text-sm", "text-base", "text-lg", "text-xl", "text-2xl"];
                               const colors = ["text-slate-400", "text-blue-400", "text-green-400", "text-yellow-400", "text-pink-400", "text-purple-400"];
-                              const sizeClass = sizes[Math.min(count, 5)]; // 字頻率越高字越大
-                              const colorClass = colors[Math.min(idx, 5)]; // 前幾名用亮色
-                              return <span key={word} className={`${sizeClass} ${colorClass} font-bold`}>#{word}</span>;
+                              const sizeClass = sizes[Math.min(count, 5)] || "text-base"; 
+                              const colorClass = colors[Math.min(idx, 5)] || "text-slate-400";
+                              return <span key={word} className={`${sizeClass} ${colorClass} font-bold transition-all hover:scale-110 cursor-default`} title={`出現 ${count} 次`}>#{word}</span>;
                           })}
                       </div>
-                  </div>
-              )}
+                  ) : (
+                      <div className="text-center py-4 text-slate-500 text-sm border-2 border-dashed border-slate-700 rounded-xl">
+                          ☁️ 目前還沒有關鍵字<br/>
+                          請去「設定」一鍵生成測試資料，或是寫一篇新的！
+                      </div>
+                  )}
+              </div>
 
               <div className="space-y-4">
                 <div className="flex justify-between items-center">
@@ -224,7 +259,7 @@ export default function App() {
                     <span className="text-slate-500 text-sm">{filteredPersonalDreams.length} 篇</span>
                 </div>
 
-                {filteredPersonalDreams.length === 0 && <p className="text-slate-500 italic text-center py-4 bg-slate-800 rounded-xl">這裡還沒有紀錄喔，快去寫一篇吧！</p>}
+                {filteredPersonalDreams.length === 0 && <p className="text-slate-500 italic text-center py-4 bg-slate-800 rounded-xl">這裡還沒有紀錄喔。</p>}
                 
                 {filteredPersonalDreams.map(d => {
                   const { text } = parseDreamData(d.analysis);
@@ -251,13 +286,23 @@ export default function App() {
         {view === 'settings' && token && (
             <div className="max-w-2xl mx-auto bg-slate-800 p-8 rounded-3xl border border-slate-700 shadow-2xl">
                 <h2 className="text-2xl font-bold mb-8 flex items-center gap-3"><Settings className="text-purple-400"/> 個人設定</h2>
+                
                 <div className="flex items-center gap-4 mb-8 p-4 bg-slate-900 rounded-xl">
                     <div className="bg-purple-600 p-3 rounded-full"><UserCircle size={32}/></div>
                     <div><p className="text-sm text-slate-400">目前登入帳號</p><p className="text-xl font-bold">{user}</p></div>
                 </div>
+
                 <div className="space-y-4">
+                    {/* ✨ 一鍵生成測試資料按鈕 */}
+                    <button onClick={handleGenerateDemoData} className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-blue-600 to-cyan-600 hover:opacity-90 py-3 rounded-xl transition-all text-white font-bold shadow-lg shadow-blue-500/30">
+                        <Zap size={18} fill="currentColor"/> ⚡ 一鍵生成 5 篇測試資料 (Demo 用)
+                    </button>
+                    <p className="text-xs text-slate-400 text-center mb-6">點擊後會自動產生包含不同關鍵字的夢境，讓你的圖表變漂亮。</p>
+
+                    <h3 className="text-lg font-bold text-slate-300 flex gap-2 items-center border-t border-slate-700 pt-6"><Database size={18}/> 危險區域</h3>
                     <button onClick={handleClearAll} className="w-full flex items-center justify-center gap-2 border border-red-500/50 text-red-400 hover:bg-red-900/20 py-3 rounded-xl transition-all"><Trash2 size={18}/> 清除所有日記</button>
                 </div>
+
                 <div className="mt-8 pt-8 border-t border-slate-700">
                     <button onClick={logout} className="w-full flex items-center justify-center gap-2 bg-slate-700 hover:bg-slate-600 py-3 rounded-xl transition-all"><LogOut size={18}/> 登出</button>
                 </div>
@@ -274,7 +319,7 @@ export default function App() {
               <div className="flex flex-col md:flex-row gap-4 justify-between items-center">
                  <div className="relative w-full md:w-1/3">
                     <Search className="absolute left-3 top-3 text-slate-400" size={18} />
-                    <input type="text" placeholder="搜尋..." className="w-full bg-slate-900 pl-10 pr-4 py-2 rounded-xl border border-slate-700 outline-none" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && fetchDreams('library')}/>
+                    <input type="text" placeholder="搜尋 (例如：貓、考試)..." className="w-full bg-slate-900 pl-10 pr-4 py-2 rounded-xl border border-slate-700 outline-none" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && fetchDreams('library')}/>
                  </div>
                  <div className="flex gap-2">
                     <button onClick={() => setMoodFilter('')} className={`p-2 rounded-lg ${moodFilter===''?'bg-slate-600':'bg-slate-900 text-slate-400'}`}>全部</button>
