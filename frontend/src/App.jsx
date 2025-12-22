@@ -6,6 +6,8 @@ import { BookOpen, PenTool, Globe, User, Trash2, Heart, Search, Calendar as CalI
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
 import { format } from 'date-fns';
+// ✨ 引入文字雲套件
+import { TagCloud } from 'react-tagcloud';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, RadialLinearScale);
 
@@ -28,7 +30,7 @@ const parseDreamData = (analysisStr) => {
     return { text: parts[0], radarData: parts.length > 1 ? parts[1].split(',').map(Number) : [50, 50, 50, 50, 50] };
 };
 
-// ✨ 測試資料庫 (用來一鍵生成)
+// ✨ 測試資料庫
 const DEMO_DATA = [
     { content: "我夢到我在考試，可是試卷上的字我都看不懂，時間快到了，我非常焦慮，一直在流汗。", mood: 1, reality: "最近期末考壓力大" },
     { content: "我夢見我變成了一隻鳥，在天空飛翔，下面的大海非常藍，感覺超級自由，完全沒有煩惱。", mood: 5, reality: "剛看完一部旅遊電影" },
@@ -110,27 +112,17 @@ export default function App() {
     try { await axios.delete(`${API_URL}/users/clear_data`, { headers: { Authorization: `Bearer ${token}` } }); alert("已清除"); fetchDreams('personal'); } catch (e) { alert("失敗"); }
   };
 
-  // ✨ 新功能：一鍵生成測試資料
   const handleGenerateDemoData = async () => {
       if (!window.confirm("這將會自動新增 5 篇測試用的夢境日記，確定嗎？")) return;
       try {
-          // 迴圈發送請求
           for (const demo of DEMO_DATA) {
               await axios.post(`${API_URL}/dreams`, {
-                  content: demo.content,
-                  mood_level: demo.mood,
-                  reality_context: demo.reality,
-                  is_public: true, // 預設公開，這樣圖書館也有資料
-                  is_anonymous: false
+                  content: demo.content, mood_level: demo.mood, reality_context: demo.reality,
+                  is_public: true, is_anonymous: false
               }, { headers: { 'Authorization': `Bearer ${token}` } });
           }
-          alert("✅ 成功生成 5 篇日記！請查看儀表板與圖書館。");
-          fetchDreams('personal');
-          setView('dashboard');
-          setShowAllDates(true);
-      } catch (e) {
-          alert("生成失敗，可能是網路問題");
-      }
+          alert("✅ 成功生成！"); fetchDreams('personal'); setView('dashboard'); setShowAllDates(true);
+      } catch (e) { alert("生成失敗"); }
   };
 
   const toggleSave = async (id) => {
@@ -142,16 +134,38 @@ export default function App() {
   useEffect(() => { if (token) { fetchDreams('personal'); setView('dashboard'); } }, []);
   useEffect(() => { if (view === 'library') fetchDreams('library'); }, [view, showSavedOnly, moodFilter]);
 
-  const filteredPersonalDreams = showAllDates 
-    ? dreams 
-    : dreams.filter(d => d.date === format(selectedDate, 'yyyy-MM-dd'));
-
+  const filteredPersonalDreams = showAllDates ? dreams : dreams.filter(d => d.date === format(selectedDate, 'yyyy-MM-dd'));
   const latestDream = dreams.length > 0 ? dreams[0] : null;
   const latestRadarData = latestDream ? parseDreamData(latestDream.analysis).radarData : [50, 50, 50, 50, 50];
 
+  // ✨ 處理文字雲資料
   const allKeywords = dreams.flatMap(d => d.keywords || []);
   const keywordCounts = allKeywords.reduce((acc, curr) => { acc[curr] = (acc[curr] || 0) + 1; return acc; }, {});
-  const sortedKeywords = Object.entries(keywordCounts).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  // 轉成套件需要的格式 { value: 'keyword', count: 10 }
+  const wordCloudData = Object.entries(keywordCounts).map(([value, count]) => ({ value, count }));
+
+  // ✨ 自定義文字雲顏色 (仿圖片風格：粉紅、紫、藍)
+  const customRenderer = (tag, size, color) => {
+    // 隨機分配霓虹色系
+    const neonColors = ['#f472b6', '#c084fc', '#818cf8', '#e879f9', '#22d3ee']; 
+    const randomColor = neonColors[Math.floor(Math.random() * neonColors.length)];
+    
+    return (
+      <span key={tag.value} style={{
+        fontSize: `${size}px`,
+        color: randomColor,
+        margin: '0px 8px',
+        padding: '0px',
+        display: 'inline-block',
+        fontFamily: 'sans-serif',
+        fontWeight: 'bold',
+        cursor: 'default',
+        transition: 'transform 0.3s'
+      }} className="hover:scale-110 hover:brightness-125">
+        {tag.value}
+      </span>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 font-sans p-4 md:p-8">
@@ -229,23 +243,22 @@ export default function App() {
                 </div>
               </div>
               
-              {/* ✨ 文字雲 (修正版：無資料時顯示提示) */}
-              <div className="bg-slate-800 p-4 rounded-3xl border border-slate-700">
-                  <h4 className="text-slate-400 text-sm mb-3 flex items-center gap-2"><Tag size={14}/> 你的夢境關鍵字雲</h4>
-                  {sortedKeywords.length > 0 ? (
-                      <div className="flex flex-wrap gap-3 items-end">
-                          {sortedKeywords.map(([word, count], idx) => {
-                              const sizes = ["text-xs", "text-sm", "text-base", "text-lg", "text-xl", "text-2xl"];
-                              const colors = ["text-slate-400", "text-blue-400", "text-green-400", "text-yellow-400", "text-pink-400", "text-purple-400"];
-                              const sizeClass = sizes[Math.min(count, 5)] || "text-base"; 
-                              const colorClass = colors[Math.min(idx, 5)] || "text-slate-400";
-                              return <span key={word} className={`${sizeClass} ${colorClass} font-bold transition-all hover:scale-110 cursor-default`} title={`出現 ${count} 次`}>#{word}</span>;
-                          })}
+              {/* ✨ 文字雲 (升級版) */}
+              <div className="bg-slate-800 p-6 rounded-3xl border border-slate-700 min-h-[200px] flex flex-col justify-center items-center relative overflow-hidden">
+                  <h4 className="text-slate-400 text-sm mb-2 absolute top-4 left-4 flex items-center gap-2"><Tag size={14}/> 你的夢境關鍵字雲</h4>
+                  {wordCloudData.length > 0 ? (
+                      <div className="mt-4">
+                        <TagCloud 
+                            minSize={16} 
+                            maxSize={50} 
+                            tags={wordCloudData} 
+                            renderer={customRenderer} 
+                        />
                       </div>
                   ) : (
-                      <div className="text-center py-4 text-slate-500 text-sm border-2 border-dashed border-slate-700 rounded-xl">
+                      <div className="text-center py-4 text-slate-500 text-sm border-2 border-dashed border-slate-700 rounded-xl w-full">
                           ☁️ 目前還沒有關鍵字<br/>
-                          請去「設定」一鍵生成測試資料，或是寫一篇新的！
+                          請去「設定」一鍵生成測試資料！
                       </div>
                   )}
               </div>
@@ -293,7 +306,6 @@ export default function App() {
                 </div>
 
                 <div className="space-y-4">
-                    {/* ✨ 一鍵生成測試資料按鈕 */}
                     <button onClick={handleGenerateDemoData} className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-blue-600 to-cyan-600 hover:opacity-90 py-3 rounded-xl transition-all text-white font-bold shadow-lg shadow-blue-500/30">
                         <Zap size={18} fill="currentColor"/> ⚡ 一鍵生成 5 篇測試資料 (Demo 用)
                     </button>
@@ -319,7 +331,7 @@ export default function App() {
               <div className="flex flex-col md:flex-row gap-4 justify-between items-center">
                  <div className="relative w-full md:w-1/3">
                     <Search className="absolute left-3 top-3 text-slate-400" size={18} />
-                    <input type="text" placeholder="搜尋 (例如：貓、考試)..." className="w-full bg-slate-900 pl-10 pr-4 py-2 rounded-xl border border-slate-700 outline-none" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && fetchDreams('library')}/>
+                    <input type="text" placeholder="搜尋..." className="w-full bg-slate-900 pl-10 pr-4 py-2 rounded-xl border border-slate-700 outline-none" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && fetchDreams('library')}/>
                  </div>
                  <div className="flex gap-2">
                     <button onClick={() => setMoodFilter('')} className={`p-2 rounded-lg ${moodFilter===''?'bg-slate-600':'bg-slate-900 text-slate-400'}`}>全部</button>
