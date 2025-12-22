@@ -2,7 +2,8 @@ import os
 import datetime
 import psycopg2
 import random
-import re # 用來做關鍵字比對
+import re
+from collections import Counter
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_bcrypt import Bcrypt
@@ -11,102 +12,125 @@ from flask_jwt_extended import JWTManager, create_access_token, jwt_required, ge
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 
-# --- 安全與資料庫設定 ---
 app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'my-fixed-secret-key-2025') 
 bcrypt = Bcrypt(app)
 jwt = JWTManager(app)
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
 def get_db_connection():
-    try:
-        return psycopg2.connect(DATABASE_URL)
-    except Exception as e:
-        print(f"❌ DB Error: {e}")
-        return None
+    try: return psycopg2.connect(DATABASE_URL)
+    except: return None
 
 def init_db():
     conn = get_db_connection()
     if conn:
-        try:
-            cur = conn.cursor()
-            cur.execute('''CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, username TEXT UNIQUE NOT NULL, password TEXT NOT NULL);''')
-            # 注意：這裡我們不需要改資料表結構，雷達圖的數據我們可以即時算出來，不用存
-            cur.execute('''CREATE TABLE IF NOT EXISTS dreams (id SERIAL PRIMARY KEY, user_id INTEGER REFERENCES users(id) ON DELETE CASCADE, date TEXT, content TEXT, mood_level INTEGER, analysis TEXT, keywords TEXT[], reality_context TEXT, is_public BOOLEAN DEFAULT FALSE, is_anonymous BOOLEAN DEFAULT FALSE);''')
-            cur.execute('''CREATE TABLE IF NOT EXISTS saved_dreams (user_id INTEGER REFERENCES users(id) ON DELETE CASCADE, dream_id INTEGER REFERENCES dreams(id) ON DELETE CASCADE, PRIMARY KEY (user_id, dream_id));''')
-            conn.commit(); cur.close(); conn.close()
-            print("✅ 資料庫檢查完成")
-        except Exception as e: print(f"❌ 初始化失敗: {e}")
+        cur = conn.cursor()
+        cur.execute('''CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, username TEXT UNIQUE NOT NULL, password TEXT NOT NULL);''')
+        cur.execute('''CREATE TABLE IF NOT EXISTS dreams (id SERIAL PRIMARY KEY, user_id INTEGER REFERENCES users(id) ON DELETE CASCADE, date TEXT, content TEXT, mood_level INTEGER, analysis TEXT, keywords TEXT[], reality_context TEXT, is_public BOOLEAN DEFAULT FALSE, is_anonymous BOOLEAN DEFAULT FALSE);''')
+        cur.execute('''CREATE TABLE IF NOT EXISTS saved_dreams (user_id INTEGER REFERENCES users(id) ON DELETE CASCADE, dream_id INTEGER REFERENCES dreams(id) ON DELETE CASCADE, PRIMARY KEY (user_id, dream_id));''')
+        conn.commit(); cur.close(); conn.close()
 
 with app.app_context(): init_db()
 
-# ================= 🧠 心理學符號資料庫 (Symbol Matching) =================
-# 這是簡單的規則式 NLP，比對常見意象
-DREAM_SYMBOLS = {
-    "蛇": "象徵著潛意識的恐懼、性慾或轉變。",
-    "牙齒": "掉牙齒通常代表對外貌的焦慮，或擔心失去掌控權。",
-    "飛": "飛翔象徵渴望自由，或想要逃離現實的壓力。",
-    "墜落": "代表生活中的失控感，或對失敗的恐懼。",
-    "被追": "象徵你在逃避某個責任、情感或過去的陰影。",
-    "水": "水代表情緒。清澈的水象徵平靜，混濁的水代表混亂。",
-    "火": "象徵強烈的情感、憤怒，或是毀滅與重生的力量。",
-    "死": "死亡在夢中通常不代表真的死亡，而是象徵「結束」與「新開始」。",
-    "考試": "代表對能力的自我懷疑，或是擔心被他人評價。",
-    "迷路": "象徵在人生方向上的迷惘，或失去了目標。",
-    "貓": "代表直覺、陰柔的力量，或獨立的性格。",
-    "狗": "象徵忠誠、友情，或是對保護的渴望。",
-    "車": "車子代表你的人生旅程。無法煞車代表失控。",
-    "前任": "不一定代表還愛著，通常象徵未解的心結或懷念過去的自己。"
+# ================= 🧠 超級心理學字典 (Rule-based Engine) =================
+# 這裡擴充了關鍵字庫，讓它能捕捉更多情境
+SYMBOL_DB = {
+    "蛇": "性、恐懼、或潛意識的轉化力量。",
+    "牙齒": "對外貌的焦慮，或擔心失去力量與控制權。",
+    "掉牙": "象徵成長的陣痛，或對衰老的恐懼。",
+    "飛": "渴望自由，超越現狀，或是想逃避壓力。",
+    "墜落": "生活失控感，對失敗的恐懼，或缺乏安全感。",
+    "被追": "在逃避某個責任、情感或過去的陰影。",
+    "水": "情緒的象徵。清澈代表平靜，混濁代表混亂。",
+    "火": "強烈的憤怒、熱情，或毀滅與重生的力量。",
+    "死": "象徵結束與新的開始，不一定代表真正的死亡。",
+    "考試": "自我懷疑，擔心被評價，或準備不足的焦慮。",
+    "迷路": "人生方向的迷惘，失去了目標或依靠。",
+    "貓": "直覺、陰柔面、獨立或神秘感。",
+    "狗": "忠誠、友情，或對保護與被愛的渴望。",
+    "車": "人生旅程的控制權。煞車失靈代表失控。",
+    "前任": "未解的心結，或懷念過去的某個自己。",
+    "遲到": "錯失良機的恐懼，或對時間管理的壓力。",
+    "裸體": "脆弱、羞恥感，或渴望展現真實的自己。",
+    "電梯": "情緒的升降，或社會地位的變化。",
+    "廁所": "渴望釋放負面情緒，或尋求隱私。",
+    "錢": "自我價值感，或對資源匱乏的恐懼。",
+    "下雨": "憂鬱釋放，洗滌心靈，或情緒的宣洩。",
+    "大海": "深層潛意識，未知與廣闊的可能性。",
+    "殺人": "壓抑的憤怒，或想要強行切斷某種關係。"
 }
 
-def advanced_dream_analysis(content, user_mood):
+def smart_analysis(content, mood_level):
     """
-    結合符號比對與情緒計算的進階分析
+    不聯網，但看起來很聰明的分析邏輯
     """
     found_keywords = []
     found_meanings = []
     
-    # 1. 符號比對 (Symbol Matching)
-    for symbol, meaning in DREAM_SYMBOLS.items():
+    # 1. 掃描內容是否有字典裡的詞
+    for symbol, meaning in SYMBOL_DB.items():
         if symbol in content:
             found_keywords.append(symbol)
             found_meanings.append(meaning)
     
-    # 2. 生成分析建議 (基於是否有找到符號)
-    if found_keywords:
-        analysis_text = f"偵測到關鍵意象：{'、'.join(found_keywords)}。{found_meanings[0]}"
-        keywords = found_keywords
+    # 2. 如果真的什麼都沒抓到 (Fallback)
+    if not found_keywords:
+        generic_keywords = ["潛意識", "情緒", "自我"]
+        if mood_level >= 4:
+            analysis_text = "這是一個充滿正能量的夢，代表你近期心態積極，潛意識正在整合美好的經驗。"
+            keywords = ["快樂", "正向", "能量"]
+        elif mood_level <= 2:
+            analysis_text = "夢境反映了內心的不安與壓力，建議多給自己一些喘息空間，照顧內在小孩。"
+            keywords = ["壓力", "釋放", "療癒"]
+        else:
+            analysis_text = "這是一個平靜的整理型夢境，大腦正在消化白天的資訊，象徵著內心的平衡。"
+            keywords = generic_keywords
     else:
-        # 如果沒找到關鍵字，使用通用心理學建議
-        generic_advice = [
-            "這個夢境反映了潛意識的波動，建議記錄下來並觀察後續。",
-            "夢中的情緒比情節更重要，試著回想醒來時的感覺。",
-            "這可能是一種情緒釋放，代表大腦正在整理白天的資訊。"
-        ]
-        analysis_text = random.choice(generic_advice)
-        # 隨機抓幾個通用的詞當關鍵字
-        keywords = ["潛意識", "情緒整理", "自我探索"]
+        # 3. 組合分析文案
+        # 取前3個關鍵字
+        keywords = found_keywords[:3]
+        main_symbol = found_keywords[0]
+        main_meaning = found_meanings[0]
+        
+        intro = f"你在夢中遇見了「{main_symbol}」，這在心理學上通常象徵{main_meaning}"
+        if len(found_keywords) > 1:
+            intro += f" 此外，夢中還出現了{found_keywords[1]}，這暗示著情緒的多層次流動。"
+        
+        analysis_text = intro
 
-    # 3. 計算情緒雷達數值 (Emotion Map Data)
-    # 我們根據使用者輸入的 mood_level (1-5) 和內容長度來推算五個維度
-    # 這裡做一點隨機波動，讓圖表看起來比較有機
-    base_score = user_mood * 20 # 把 1-5 轉成 20-100
+    # 4. 計算雷達圖數值 (依據關鍵字屬性微調)
+    # 預設值
+    radar = {"joy": 50, "anxiety": 50, "stress": 50, "clarity": 50, "mystic": 50}
     
-    radar_data = {
-        "joy": base_score if user_mood > 3 else base_score / 2,     # 快樂
-        "anxiety": 100 - base_score if user_mood < 3 else 20,       # 焦慮
-        "stress": min(100, len(content) / 2),                       # 壓力 (字越多通常越複雜)
-        "clarity": random.randint(40, 90),                          # 清晰度 (隨機)
-        "mystic": 80 if any(k in content for k in ["飛", "死", "火"]) else 40 # 奇幻度
-    }
+    # 根據 mood_level 調整
+    radar["joy"] = mood_level * 20
+    radar["anxiety"] = (6 - mood_level) * 15
     
-    return analysis_text, keywords, radar_data
+    # 根據關鍵字調整
+    bad_vibes = ["死", "墜落", "被追", "考試", "迷路", "遲到", "蛇", "火"]
+    mystic_vibes = ["飛", "水", "大海", "貓", "死", "火"]
+    
+    hit_bad = sum(1 for k in keywords if k in bad_vibes)
+    hit_mystic = sum(1 for k in keywords if k in mystic_vibes)
+    
+    radar["stress"] += hit_bad * 15
+    radar["anxiety"] += hit_bad * 10
+    radar["mystic"] += hit_mystic * 20
+    radar["clarity"] = random.randint(30, 90) # 清晰度比較隨機
+
+    # 限制在 0-100
+    for k in radar: radar[k] = max(10, min(100, radar[k]))
+    
+    # 格式化輸出給前端
+    radar_str = f"||RADAR:{int(radar['joy'])},{int(radar['anxiety'])},{int(radar['stress'])},{int(radar['clarity'])},{int(radar['mystic'])}"
+    
+    return analysis_text + radar_str, keywords
 
 # =======================================================================
 
 @app.route('/')
-def home(): return "✅ Dream Log 後端運作中！"
+def home(): return "Dream Log Smart Backend Running"
 
-# --- API ---
 @app.route('/api/register', methods=['POST'])
 def register():
     data = request.json
@@ -126,7 +150,7 @@ def login():
     user = cur.fetchone(); cur.close(); conn.close()
     if user and bcrypt.check_password_hash(user[2], data['password']):
         return jsonify(access_token=create_access_token(identity=str(user[0])), username=user[1]), 200
-    return jsonify({"msg": "帳號或密碼錯誤"}), 401
+    return jsonify({"msg": "錯誤"}), 401
 
 @app.route('/api/dreams', methods=['GET'])
 @jwt_required(optional=True)
@@ -137,6 +161,7 @@ def get_dreams():
     uid = get_jwt_identity()
     conn = get_db_connection(); cur = conn.cursor()
 
+    # ✨ 這裡確保了 personal 模式只看 user_id，不管 is_public
     base_query = """
         SELECT d.id, d.date, d.content, d.mood_level, d.analysis, d.keywords, d.reality_context, d.is_anonymous, u.username,
         CASE WHEN s.user_id IS NOT NULL THEN TRUE ELSE FALSE END as is_saved
@@ -149,12 +174,15 @@ def get_dreams():
 
     if mode == 'personal':
         if not uid: return jsonify({"msg": "請先登入"}), 401
-        conditions.append("d.user_id = %s"); params.append(uid)
+        conditions.append("d.user_id = %s") # 只要是我寫的，全部抓出來
+        params.append(uid)
     elif mode == 'saved':
         if not uid: return jsonify({"msg": "請先登入"}), 401
         base_query = base_query.replace("LEFT JOIN", "JOIN")
-        conditions.append("s.user_id = %s"); params.append(uid)
-    else: conditions.append("d.is_public = TRUE")
+        conditions.append("s.user_id = %s")
+        params.append(uid)
+    else: # library
+        conditions.append("d.is_public = TRUE") # 圖書館只看公開的
 
     if search:
         conditions.append("(d.content ILIKE %s OR %s = ANY(d.keywords))")
@@ -167,20 +195,22 @@ def get_dreams():
     if conditions: base_query += " WHERE " + " AND ".join(conditions)
     base_query += " ORDER BY d.id DESC LIMIT 50"
 
-    cur.execute(base_query, tuple(params))
-    rows = cur.fetchall()
-    dreams = []
-    
-    # 這裡我們不需要每次都算雷達圖，只在寫入時算好，或者前端即時算
-    # 為了簡化，GET 還是回傳基本資料
-    for r in rows:
-        dreams.append({
-            'id':r[0], 'date':r[1], 'content':r[2], 'mood_level':r[3], 
-            'analysis':r[4], 'keywords':r[5], 'reality_context':r[6], 
-            'is_anonymous':r[7], 'author':"匿名" if r[7] else r[8], 'is_saved':r[9]
-        })
-    cur.close(); conn.close()
-    return jsonify(dreams)
+    try:
+        cur.execute(base_query, tuple(params))
+        rows = cur.fetchall()
+        dreams = []
+        for r in rows:
+            dreams.append({
+                'id':r[0], 'date':r[1], 'content':r[2], 'mood_level':r[3], 
+                'analysis':r[4], 'keywords':r[5], 'reality_context':r[6], 
+                'is_anonymous':r[7], 'author':"匿名" if r[7] else r[8], 'is_saved':r[9]
+            })
+        return jsonify(dreams)
+    except Exception as e:
+        print(e)
+        return jsonify([])
+    finally:
+        cur.close(); conn.close()
 
 @app.route('/api/dreams', methods=['POST'])
 @jwt_required()
@@ -189,19 +219,14 @@ def add_dream():
         user_id = get_jwt_identity(); data = request.json
         mood = data.get('mood_level', 3)
         
-        # 🔥 使用新的進階分析函式
-        analysis, keywords, radar_stats = advanced_dream_analysis(data['content'], mood)
+        # 🔥 使用新的聰明分析
+        analysis_str, keywords = smart_analysis(data['content'], mood)
         
-        # 這裡我們把雷達圖的數據直接附加在 analysis 文字後面，用一個特殊的符號分隔，讓前端解析
-        # 這樣就不用改資料庫結構了！這是一個聰明的 Hack
-        radar_str = f"||RADAR:{radar_stats['joy']},{radar_stats['anxiety']},{radar_stats['stress']},{radar_stats['clarity']},{radar_stats['mystic']}"
-        final_analysis = analysis + radar_str
-
         conn = get_db_connection(); cur = conn.cursor()
         cur.execute("INSERT INTO dreams (user_id, date, content, mood_level, analysis, keywords, reality_context, is_public, is_anonymous) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id", 
-                    (user_id, datetime.datetime.now().strftime("%Y-%m-%d"), data['content'], mood, final_analysis, keywords, data.get('reality_context',''), data.get('is_public',False), data.get('is_anonymous',False)))
+                    (user_id, datetime.datetime.now().strftime("%Y-%m-%d"), data['content'], mood, analysis_str, keywords, data.get('reality_context',''), data.get('is_public',False), data.get('is_anonymous',False)))
         conn.commit(); cur.close(); conn.close()
-        return jsonify({"msg": "分析完成！", "radar": radar_stats}), 201
+        return jsonify({"msg": "儲存成功"}), 201
     except Exception as e: return jsonify({"msg": str(e)}), 500
 
 @app.route('/api/dreams/<int:id>', methods=['DELETE'])
@@ -224,15 +249,13 @@ def toggle_save(id):
     conn.commit(); cur.close(); conn.close()
     return jsonify({"is_saved": saved}), 200
 
-# ✨ 新增：清除所有資料 (Settings 功能)
 @app.route('/api/users/clear_data', methods=['DELETE'])
 @jwt_required()
 def clear_user_data():
-    uid = get_jwt_identity()
-    conn = get_db_connection(); cur = conn.cursor()
+    uid = get_jwt_identity(); conn = get_db_connection(); cur = conn.cursor()
     cur.execute("DELETE FROM dreams WHERE user_id = %s", (uid,))
     conn.commit(); cur.close(); conn.close()
-    return jsonify({"msg": "所有日記已清除"}), 200
+    return jsonify({"msg": "已清除"}), 200
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)

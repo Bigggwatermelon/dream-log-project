@@ -1,13 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Line, Radar } from 'react-chartjs-2'; // ✨ 引入 Radar
+import { Line, Radar } from 'react-chartjs-2';
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, RadialLinearScale } from 'chart.js';
-import { BookOpen, PenTool, Globe, User, Trash2, Heart, Search, Calendar as CalIcon, Smile, Frown, Meh, RefreshCw, Settings, LogOut, Database, UserCircle } from 'lucide-react';
+import { BookOpen, PenTool, Globe, User, Trash2, Heart, Search, Calendar as CalIcon, Smile, Frown, Meh, RefreshCw, Settings, LogOut, Database, UserCircle, Tag, Eye } from 'lucide-react';
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
 import { format } from 'date-fns';
 
-// ✨ 註冊 Radar 需要的 RadialLinearScale
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, RadialLinearScale);
 
 const API_URL = 'https://dream-backend-dinx.onrender.com/api'; 
@@ -23,19 +22,15 @@ const calendarStyles = `
   .react-calendar__month-view__days__day--weekend { color: #f472b6; }
 `;
 
-// ✨ 輔助函式：解析後端回傳的 Radar 數據字串
 const parseDreamData = (analysisStr) => {
     const parts = analysisStr.split('||RADAR:');
-    const text = parts[0];
-    const radarData = parts.length > 1 ? parts[1].split(',').map(Number) : [50, 50, 50, 50, 50];
-    return { text, radarData }; // [joy, anxiety, stress, clarity, mystic]
+    return { text: parts[0], radarData: parts.length > 1 ? parts[1].split(',').map(Number) : [50, 50, 50, 50, 50] };
 };
 
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem('token'));
   const [user, setUser] = useState(localStorage.getItem('username'));
   const [view, setView] = useState('home'); 
-  
   const [dreams, setDreams] = useState([]);
   const [libraryDreams, setLibraryDreams] = useState([]);
   const [expandedId, setExpandedId] = useState(null);
@@ -45,6 +40,8 @@ export default function App() {
   const [showSavedOnly, setShowSavedOnly] = useState(false);
   
   const [selectedDate, setSelectedDate] = useState(new Date());
+  // ✨ 新增狀態：是否忽略日期篩選（顯示全部）
+  const [showAllDates, setShowAllDates] = useState(true);
 
   const [form, setForm] = useState({ content: '', mood: 3, reality: '', isPublic: false, isAnon: false });
   const [authForm, setAuthForm] = useState({ username: '', password: '' });
@@ -74,7 +71,6 @@ export default function App() {
       }
       const config = currentToken ? { headers: { Authorization: `Bearer ${currentToken}` } } : {};
       const res = await axios.get(`${API_URL}/dreams${query}`, config);
-      
       if (mode === 'personal') setDreams(res.data);
       else setLibraryDreams(res.data);
     } catch (e) { console.error(e); }
@@ -89,7 +85,8 @@ export default function App() {
         is_public: form.isPublic, is_anonymous: form.isAnon
       }, { headers: { 'Authorization': `Bearer ${token}` } });
       setForm({ content: '', mood: 3, reality: '', isPublic: false, isAnon: false });
-      alert("✅ 分析完成！情緒地圖已更新"); fetchDreams('personal');
+      alert("✅ 分析完成！"); fetchDreams('personal');
+      setShowAllDates(true); // 存檔後自動顯示最新列表
     } catch (e) { alert("失敗"); }
   };
 
@@ -98,14 +95,10 @@ export default function App() {
     await axios.delete(`${API_URL}/dreams/${id}`, { headers: { Authorization: `Bearer ${token}` } });
     fetchDreams('personal');
   };
-  
-  // ✨ 清除所有資料 (設定頁面用)
+
   const handleClearAll = async () => {
-    if (!window.confirm("⚠️ 警告：這將刪除你所有的日記，無法復原！確定嗎？")) return;
-    try {
-        await axios.delete(`${API_URL}/users/clear_data`, { headers: { Authorization: `Bearer ${token}` } });
-        alert("資料已清除"); fetchDreams('personal');
-    } catch (e) { alert("清除失敗"); }
+    if (!window.confirm("⚠️ 警告：這將刪除你所有的日記！")) return;
+    try { await axios.delete(`${API_URL}/users/clear_data`, { headers: { Authorization: `Bearer ${token}` } }); alert("已清除"); fetchDreams('personal'); } catch (e) { alert("失敗"); }
   };
 
   const toggleSave = async (id) => {
@@ -117,11 +110,18 @@ export default function App() {
   useEffect(() => { if (token) { fetchDreams('personal'); setView('dashboard'); } }, []);
   useEffect(() => { if (view === 'library') fetchDreams('library'); }, [view, showSavedOnly, moodFilter]);
 
-  const filteredPersonalDreams = dreams.filter(d => d.date === format(selectedDate, 'yyyy-MM-dd'));
+  // ✨ 關鍵修正：列表篩選邏輯
+  const filteredPersonalDreams = showAllDates 
+    ? dreams 
+    : dreams.filter(d => d.date === format(selectedDate, 'yyyy-MM-dd'));
 
-  // ✨ 計算最新的雷達圖數據 (取最新一篇夢境，如果沒有則預設)
   const latestDream = dreams.length > 0 ? dreams[0] : null;
   const latestRadarData = latestDream ? parseDreamData(latestDream.analysis).radarData : [50, 50, 50, 50, 50];
+
+  // ✨ 計算文字雲數據
+  const allKeywords = dreams.flatMap(d => d.keywords || []);
+  const keywordCounts = allKeywords.reduce((acc, curr) => { acc[curr] = (acc[curr] || 0) + 1; return acc; }, {});
+  const sortedKeywords = Object.entries(keywordCounts).sort((a, b) => b[1] - a[1]).slice(0, 10); // 取前10名
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 font-sans p-4 md:p-8">
@@ -136,7 +136,7 @@ export default function App() {
               <>
                 <button onClick={() => setView('dashboard')} className={`px-4 py-2 rounded-lg ${view==='dashboard'?'bg-purple-600':'hover:bg-slate-700'}`}>儀表板</button>
                 <button onClick={() => setView('library')} className={`px-4 py-2 rounded-lg ${view==='library'?'bg-pink-600':'hover:bg-slate-700'}`}>圖書館</button>
-                <button onClick={() => setView('settings')} className={`p-2 rounded-lg ${view==='settings'?'bg-slate-600':'hover:bg-slate-700'}`} title="設定"><Settings/></button>
+                <button onClick={() => setView('settings')} className={`p-2 rounded-lg ${view==='settings'?'bg-slate-600':'hover:bg-slate-700'}`}><Settings size={20}/></button>
               </>
             ) : (
               <>
@@ -147,7 +147,6 @@ export default function App() {
           </div>
         </nav>
 
-        {/* 1. 登入/註冊/首頁 */}
         {['home', 'login', 'register'].includes(view) && !token && (
           <div className="max-w-md mx-auto mt-20 bg-slate-800 p-8 rounded-3xl border border-slate-700 shadow-2xl">
             {view === 'home' && (
@@ -169,59 +168,64 @@ export default function App() {
           </div>
         )}
 
-        {/* 2. 個人儀表板 (Dashboard) */}
         {view === 'dashboard' && token && (
           <div className="grid md:grid-cols-3 gap-8">
             <div className="md:col-span-1 bg-slate-800 p-6 rounded-3xl border border-slate-700 h-fit">
               <h3 className="text-xl font-bold mb-4 flex gap-2"><PenTool/> 新增紀錄</h3>
-              <textarea className="w-full bg-slate-900 p-3 rounded-xl mb-3 h-32 text-white" placeholder="昨晚夢到了什麼..." value={form.content} onChange={e=>setForm({...form, content:e.target.value})} />
+              <textarea className="w-full bg-slate-900 p-3 rounded-xl mb-3 h-32 text-white" placeholder="我夢到被蛇咬..." value={form.content} onChange={e=>setForm({...form, content:e.target.value})} />
               <textarea className="w-full bg-slate-900 p-3 rounded-xl mb-4 h-20 text-sm text-slate-300" placeholder="現實連結..." value={form.reality} onChange={e=>setForm({...form, reality:e.target.value})} />
               <div className="mb-4"><label className="text-sm text-slate-400">情緒指數: {form.mood}</label><input type="range" min="1" max="5" className="w-full accent-purple-500" value={form.mood} onChange={e=>setForm({...form, mood:Number(e.target.value)})}/></div>
               <div className="flex gap-4 mb-6">
                 <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.isPublic} onChange={e=>setForm({...form, isPublic:e.target.checked})} className="accent-pink-500"/> 公開</label>
                 {form.isPublic && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.isAnon} onChange={e=>setForm({...form, isAnon:e.target.checked})} className="accent-slate-500"/> 匿名</label>}
               </div>
-              <button onClick={handleSubmit} className="w-full bg-gradient-to-r from-purple-600 to-pink-600 py-3 rounded-xl font-bold">✨ AI 分析並繪製情緒地圖</button>
+              <button onClick={handleSubmit} className="w-full bg-gradient-to-r from-purple-600 to-pink-600 py-3 rounded-xl font-bold">✨ AI 分析並存檔</button>
             </div>
 
             <div className="md:col-span-2 space-y-6">
               <div className="grid md:grid-cols-2 gap-6">
-                <div className="bg-slate-800 p-4 rounded-3xl border border-slate-700 flex justify-center">
-                    <Calendar onChange={setSelectedDate} value={selectedDate} className="text-sm" />
+                <div className="bg-slate-800 p-4 rounded-3xl border border-slate-700 flex flex-col items-center">
+                    <Calendar onChange={(date) => { setSelectedDate(date); setShowAllDates(false); }} value={selectedDate} className="text-sm" />
+                    <button onClick={() => setShowAllDates(true)} className={`mt-2 text-sm px-3 py-1 rounded-full ${showAllDates ? 'bg-purple-600 text-white' : 'bg-slate-700 text-slate-400 hover:text-white'}`}>
+                        顯示全部日期
+                    </button>
                 </div>
-                
-                {/* ✨ 情緒地圖 (雷達圖) */}
                 <div className="bg-slate-800 p-4 rounded-3xl border border-slate-700 h-64 relative flex flex-col items-center justify-center">
                     <h4 className="text-slate-400 text-sm absolute top-4 left-4">最新情緒地圖</h4>
                     <div className="w-full h-full p-2">
-                        <Radar 
-                            data={{
-                                labels: ['快樂', '焦慮', '壓力', '清晰度', '奇幻度'],
-                                datasets: [{
-                                    label: '夢境數值',
-                                    data: latestRadarData,
-                                    backgroundColor: 'rgba(219, 39, 119, 0.2)',
-                                    borderColor: 'rgba(219, 39, 119, 1)',
-                                    borderWidth: 2,
-                                    pointBackgroundColor: 'white',
-                                }]
-                            }}
-                            options={{
-                                maintainAspectRatio: false,
-                                scales: { r: { suggestedMin: 0, suggestedMax: 100, grid: { color: '#334155' }, pointLabels: { color: '#e2e8f0' }, ticks: { display: false } } },
-                                plugins: { legend: { display: false } }
-                            }}
-                        />
+                        <Radar data={{labels: ['快樂', '焦慮', '壓力', '清晰度', '奇幻度'], datasets: [{label: '數值', data: latestRadarData, backgroundColor: 'rgba(219, 39, 119, 0.2)', borderColor: 'rgba(219, 39, 119, 1)', borderWidth: 2, pointBackgroundColor: 'white'}]}}
+                            options={{maintainAspectRatio: false, scales: { r: { suggestedMin: 0, suggestedMax: 100, grid: { color: '#334155' }, pointLabels: { color: '#e2e8f0' }, ticks: { display: false } } }, plugins: { legend: { display: false } }}} />
                     </div>
                 </div>
               </div>
+              
+              {/* ✨ 新增：文字雲 (Word Cloud) */}
+              {sortedKeywords.length > 0 && (
+                  <div className="bg-slate-800 p-4 rounded-3xl border border-slate-700">
+                      <h4 className="text-slate-400 text-sm mb-3 flex items-center gap-2"><Tag size={14}/> 你的夢境關鍵字</h4>
+                      <div className="flex flex-wrap gap-3 items-end">
+                          {sortedKeywords.map(([word, count], idx) => {
+                              const sizes = ["text-xs", "text-sm", "text-base", "text-lg", "text-xl", "text-2xl"];
+                              const colors = ["text-slate-400", "text-blue-400", "text-green-400", "text-yellow-400", "text-pink-400", "text-purple-400"];
+                              const sizeClass = sizes[Math.min(count, 5)]; // 字頻率越高字越大
+                              const colorClass = colors[Math.min(idx, 5)]; // 前幾名用亮色
+                              return <span key={word} className={`${sizeClass} ${colorClass} font-bold`}>#{word}</span>;
+                          })}
+                      </div>
+                  </div>
+              )}
 
               <div className="space-y-4">
-                <h3 className="text-xl font-bold flex items-center gap-2">
-                   <CalIcon size={20} className="text-purple-400"/> 
-                   {format(selectedDate, 'yyyy-MM-dd')} 的日記
-                </h3>
-                {filteredPersonalDreams.length === 0 && <p className="text-slate-500 italic">這一天沒有紀錄。</p>}
+                <div className="flex justify-between items-center">
+                    <h3 className="text-xl font-bold flex items-center gap-2">
+                    <CalIcon size={20} className="text-purple-400"/> 
+                    {showAllDates ? "所有夢境紀錄" : `${format(selectedDate, 'yyyy-MM-dd')} 的日記`}
+                    </h3>
+                    <span className="text-slate-500 text-sm">{filteredPersonalDreams.length} 篇</span>
+                </div>
+
+                {filteredPersonalDreams.length === 0 && <p className="text-slate-500 italic text-center py-4 bg-slate-800 rounded-xl">這裡還沒有紀錄喔，快去寫一篇吧！</p>}
+                
                 {filteredPersonalDreams.map(d => {
                   const { text } = parseDreamData(d.analysis);
                   return (
@@ -230,6 +234,7 @@ export default function App() {
                         <span className="text-xs text-slate-400">{d.date}</span>
                         <div className="flex items-center gap-3">
                             <span className={`text-xs px-2 py-1 rounded ${d.mood_level>=3?'bg-green-900/50 text-green-300':'bg-red-900/50 text-red-300'}`}>Mood: {d.mood_level}</span>
+                            {!d.is_public && <span className="text-xs px-2 py-1 rounded bg-slate-700 text-slate-400 flex gap-1 items-center"><Eye size={10}/> 私密</span>}
                             <button onClick={() => handleDelete(d.id)} className="text-slate-500 hover:text-red-400"><Trash2 size={16} /></button>
                         </div>
                         </div>
@@ -243,37 +248,22 @@ export default function App() {
           </div>
         )}
 
-        {/* 3. 設定頁面 (Settings) */}
         {view === 'settings' && token && (
             <div className="max-w-2xl mx-auto bg-slate-800 p-8 rounded-3xl border border-slate-700 shadow-2xl">
                 <h2 className="text-2xl font-bold mb-8 flex items-center gap-3"><Settings className="text-purple-400"/> 個人設定</h2>
-                
                 <div className="flex items-center gap-4 mb-8 p-4 bg-slate-900 rounded-xl">
                     <div className="bg-purple-600 p-3 rounded-full"><UserCircle size={32}/></div>
-                    <div>
-                        <p className="text-sm text-slate-400">目前登入帳號</p>
-                        <p className="text-xl font-bold">{user}</p>
-                    </div>
+                    <div><p className="text-sm text-slate-400">目前登入帳號</p><p className="text-xl font-bold">{user}</p></div>
                 </div>
-
                 <div className="space-y-4">
-                    <h3 className="text-lg font-bold text-slate-300 flex gap-2 items-center"><Database size={18}/> 資料管理</h3>
-                    <p className="text-slate-400 text-sm mb-4">這裡可以管理你的所有夢境資料。請注意，刪除操作無法復原。</p>
-                    
-                    <button onClick={handleClearAll} className="w-full flex items-center justify-center gap-2 border border-red-500/50 text-red-400 hover:bg-red-900/20 py-3 rounded-xl transition-all">
-                        <Trash2 size={18}/> 清除所有日記
-                    </button>
+                    <button onClick={handleClearAll} className="w-full flex items-center justify-center gap-2 border border-red-500/50 text-red-400 hover:bg-red-900/20 py-3 rounded-xl transition-all"><Trash2 size={18}/> 清除所有日記</button>
                 </div>
-
                 <div className="mt-8 pt-8 border-t border-slate-700">
-                    <button onClick={logout} className="w-full flex items-center justify-center gap-2 bg-slate-700 hover:bg-slate-600 py-3 rounded-xl transition-all">
-                        <LogOut size={18}/> 登出
-                    </button>
+                    <button onClick={logout} className="w-full flex items-center justify-center gap-2 bg-slate-700 hover:bg-slate-600 py-3 rounded-xl transition-all"><LogOut size={18}/> 登出</button>
                 </div>
             </div>
         )}
 
-        {/* 4. 夢境圖書館 (Library) */}
         {view === 'library' && (
           <div>
             <div className="bg-slate-800 p-6 rounded-3xl border border-slate-700 mb-8 shadow-xl">
@@ -288,19 +278,14 @@ export default function App() {
                  </div>
                  <div className="flex gap-2">
                     <button onClick={() => setMoodFilter('')} className={`p-2 rounded-lg ${moodFilter===''?'bg-slate-600':'bg-slate-900 text-slate-400'}`}>全部</button>
-                    <button onClick={() => setMoodFilter('happy')} className={`p-2 rounded-lg flex gap-1 ${moodFilter==='happy'?'bg-green-600':'bg-slate-900 text-green-400'}`}><Smile size={18}/> 快樂</button>
-                    <button onClick={() => setMoodFilter('neutral')} className={`p-2 rounded-lg flex gap-1 ${moodFilter==='neutral'?'bg-blue-600':'bg-slate-900 text-blue-400'}`}><Meh size={18}/> 平靜</button>
-                    <button onClick={() => setMoodFilter('sad')} className={`p-2 rounded-lg flex gap-1 ${moodFilter==='sad'?'bg-red-600':'bg-slate-900 text-red-400'}`}><Frown size={18}/> 焦慮</button>
+                    <button onClick={() => setMoodFilter('happy')} className={`p-2 rounded-lg flex gap-1 ${moodFilter==='happy'?'bg-green-600':'bg-slate-900 text-green-400'}`}><Smile size={18}/></button>
+                    <button onClick={() => setMoodFilter('neutral')} className={`p-2 rounded-lg flex gap-1 ${moodFilter==='neutral'?'bg-blue-600':'bg-slate-900 text-blue-400'}`}><Meh size={18}/></button>
+                    <button onClick={() => setMoodFilter('sad')} className={`p-2 rounded-lg flex gap-1 ${moodFilter==='sad'?'bg-red-600':'bg-slate-900 text-red-400'}`}><Frown size={18}/></button>
                  </div>
-                 {token && (
-                    <button onClick={() => setShowSavedOnly(!showSavedOnly)} className={`px-3 py-2 rounded-xl flex items-center gap-2 border ${showSavedOnly ? 'bg-pink-600 border-pink-600' : 'bg-transparent border-slate-600'}`}>
-                      <Heart size={18} fill={showSavedOnly ? "currentColor" : "none"}/> 只看收藏
-                    </button>
-                 )}
+                 {token && <button onClick={() => setShowSavedOnly(!showSavedOnly)} className={`px-3 py-2 rounded-xl flex items-center gap-2 border ${showSavedOnly ? 'bg-pink-600 border-pink-600' : 'bg-transparent border-slate-600'}`}><Heart size={18} fill={showSavedOnly ? "currentColor" : "none"}/> 只看收藏</button>}
                  <button onClick={() => fetchDreams('library')} className="bg-purple-600 p-2 rounded-xl hover:bg-purple-500"><RefreshCw size={20}/></button>
               </div>
             </div>
-
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
               {libraryDreams.length === 0 && <div className="col-span-full text-center text-slate-500 py-10">找不到符合條件的夢境...</div>}
               {libraryDreams.map(d => {
@@ -311,18 +296,10 @@ export default function App() {
                     <div className="bg-slate-700 p-2 rounded-full"><User size={16}/></div>
                     <span className="font-bold text-slate-300">{d.author}</span>
                     <span className="ml-auto text-xs text-slate-500">{d.date}</span>
-                    {token && (
-                      <button onClick={() => toggleSave(d.id)} className={`ml-2 p-1 rounded-full transition-all ${d.is_saved ? 'text-pink-500' : 'text-slate-600 hover:text-pink-400'}`}>
-                        <Heart size={18} fill={d.is_saved ? "currentColor" : "none"} />
-                      </button>
-                    )}
+                    {token && <button onClick={() => toggleSave(d.id)} className={`ml-2 p-1 rounded-full transition-all ${d.is_saved ? 'text-pink-500' : 'text-slate-600 hover:text-pink-400'}`}><Heart size={18} fill={d.is_saved ? "currentColor" : "none"} /></button>}
                   </div>
                   <p className={`text-slate-200 mb-2 leading-relaxed ${expandedId === d.id ? '' : 'line-clamp-3'}`}>{d.content}</p>
-                  {d.content.length > 50 && (
-                    <button onClick={() => setExpandedId(expandedId === d.id ? null : d.id)} className="text-pink-400 hover:text-pink-300 text-sm font-medium mb-4 text-left">
-                      {expandedId === d.id ? "收起全文 ↑" : "閱讀全文 ..."}
-                    </button>
-                  )}
+                  {d.content.length > 50 && <button onClick={() => setExpandedId(expandedId === d.id ? null : d.id)} className="text-pink-400 hover:text-pink-300 text-sm font-medium mb-4 text-left">{expandedId === d.id ? "收起全文 ↑" : "閱讀全文 ..."}</button>}
                   <div className="mt-auto">
                     <div className="flex flex-wrap gap-2 mb-4">{(d.keywords || []).map((k,i) => <span key={i} className="text-xs bg-slate-900 text-pink-300 px-2 py-1 rounded-full">#{k}</span>)}</div>
                     <div className="text-xs text-purple-300 bg-slate-700/30 p-3 rounded-lg">🤖 {text}</div>
