@@ -59,22 +59,42 @@ export default function App() {
     } catch (e) { console.error(e); }
   };
 
-  // 3. 新增夢境
+  // 3. 新增夢境 (除錯版)
   const handleSubmit = async (e) => {
     e.preventDefault();
+    
+    // 🔍 檢查點 1：Token 到底有沒有？
+    console.log("準備發送 Token:", token);
+    if (!token) {
+        alert("❌ 錯誤：沒有 Token！請先登入。");
+        return;
+    }
+
     try {
-      await axios.post(`${API_URL}/dreams`, {
+      const res = await axios.post(`${API_URL}/dreams`, {
         content: form.content,
         mood_level: form.mood,
         reality_context: form.reality,
         is_public: form.isPublic,
         is_anonymous: form.isAnon
-      }, { headers: { Authorization: `Bearer ${token}` } });
+      }, { 
+        headers: { 
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json' 
+        } 
+      });
       
+      console.log("伺服器回應:", res.data);
       setForm({ content: '', mood: 3, reality: '', isPublic: false, isAnon: false });
-      alert("AI 解析完成並存檔！");
+      alert("✅ 成功：" + (res.data.msg || "AI 解析完成並存檔！"));
       fetchDreams('personal');
-    } catch (e) { alert("儲存失敗"); }
+      
+    } catch (e) { 
+        console.error("發送失敗:", e);
+        // 🔍 檢查點 2：後端到底罵了什麼？
+        const errorMsg = e.response?.data?.msg || e.message;
+        alert("❌ 儲存失敗：" + errorMsg); 
+    }
   };
 
   // 初始載入
