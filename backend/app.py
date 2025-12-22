@@ -61,13 +61,70 @@ def init_db():
 with app.app_context():
     init_db()
 
-# ================= 🚀 強制指定模型 (不自動偵測) =================
+# ================= 🤖 AI 自動獵人 (核心修改) =================
 
 GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY')
 
-# 直接寫死目前最穩定、額度最高的模型
-# 備選名單：如果 Flash 還是不行，可以換成 'gemini-1.5-flash-8b'
-TARGET_MODEL = "models/gemini-1.5-flash"
+def call_ai_api(content):
+    """
+    嘗試多種模型名稱，直到成功為止。
+    """
+    # 獵殺清單：優先用 Flash (快又免費)，最後才用 Pro (額度少)
+    model_candidates = [
+        "models/gemini-1.5-flash",
+        "models/gemini-1.5-flash-001",
+        "models/gemini-1.5-pro",
+        "models/gemini-pro"
+    ]
+    
+    last_error = "AI 未設定"
+    
+    if not GOOGLE_API_KEY:
+        return "AI 未設定 (無 API Key)", ["未分析"]
+
+    for model in model_candidates:
+        try:
+            print(f"🔍 嘗試模型: {model} ...")
+            api_url = f"https://generativelanguage.googleapis.com/v1beta/{model}:generateContent?key={GOOGLE_API_KEY}"
+            payload = {"contents": [{"parts": [{"text": f"分析夢境：{content}。給予簡短心理建議(50字內)與3個關鍵字。格式：建議|關鍵字1,關鍵字2"}]}]}
+            
+            resp = requests.post(api_url, json=payload, headers={'Content-Type': 'application/json'}, timeout=10)
+            
+            if resp.status_code == 200:
+                # 成功！解析資料
+                result = resp.json()
+                text = result.get('candidates', [])[0].get('content', {}).get('parts', [])[0].get('text', '')
+                keywords = ["未分析"]
+                analysis_text = "分析完成"
+                
+                if text:
+                    parts = text.split('|')
+                    analysis_text = parts[0].strip()
+                    if len(parts) > 1: keywords = [k.strip() for k in parts[1].split(',')]
+                
+                print(f"✅ 成功連線！使用模型: {model}")
+                return analysis_text, keywords
+            
+            elif resp.status_code == 404:
+                print(f"❌ {model} 找不到 (404)，嘗試下一個...")
+                last_error = f"模型 {model} 未找到"
+                continue # 換下一個模型試試
+            elif resp.status_code == 429:
+                print(f"❌ {model} 額度滿了 (429)，嘗試下一個...")
+                last_error = "AI 額度用盡"
+                continue
+            else:
+                print(f"⚠️ API Error {resp.status_code}: {resp.text}")
+                last_error = f"連線錯誤 ({resp.status_code})"
+                # 其他錯誤也換下一個試試
+                continue
+
+        except Exception as e:
+            print(f"❌ Critical Error on {model}: {e}")
+            last_error = "系統錯誤"
+            continue
+
+    return f"AI 失敗: {last_error}", ["未分析"]
 
 # ==============================================================
 
@@ -147,41 +204,8 @@ def add_dream():
         is_anon = data.get('is_anonymous', False)
         date_str = datetime.datetime.now().strftime("%Y-%m-%d")
 
-        # --- AI 分析 (REST API 直連) ---
-        analysis_text = "AI 忙線中 (額度已滿或連線錯誤)"
-        keywords = ["未分析"]
-
-        if GOOGLE_API_KEY:
-            try:
-                # 這裡直接使用 gemini-1.5-flash，不使用 auto-detect
-                api_url = f"https://generativelanguage.googleapis.com/v1beta/{TARGET_MODEL}:generateContent?key={GOOGLE_API_KEY}"
-                
-                payload = {"contents": [{"parts": [{"text": f"分析夢境：{content}。給予簡短心理建議(50字內)與3個關鍵字。格式：建議|關鍵字1,關鍵字2"}]}]}
-                
-                resp = requests.post(api_url, json=payload, headers={'Content-Type': 'application/json'})
-                
-                if resp.status_code == 200:
-                    result = resp.json()
-                    text = result.get('candidates', [])[0].get('content', {}).get('parts', [])[0].get('text', '')
-                    if text:
-                        parts = text.split('|')
-                        analysis_text = parts[0].strip()
-                        if len(parts) > 1: keywords = [k.strip() for k in parts[1].split(',')]
-                elif resp.status_code == 429:
-                     analysis_text = "AI 額度用盡 (請換 API Key 或等待)"
-                     print("❌ 429 Too Many Requests: 今天的額度用完了")
-                elif resp.status_code == 404:
-                     analysis_text = "AI 模型未找到 (404)"
-                     print(f"❌ 404 Not Found: 無法找到模型 {TARGET_MODEL}")
-                else:
-                    print(f"⚠️ API Error {resp.status_code}: {resp.text}")
-                    analysis_text = f"AI 連線錯誤 ({resp.status_code})"
-
-            except Exception as e:
-                print(f"AI Critical Error: {e}")
-                analysis_text = "AI 系統錯誤"
-        else:
-            analysis_text = "AI 未設定 (無 API Key)"
+        # --- 呼叫自動獵人 AI ---
+        analysis_text, keywords = call_ai_api(content)
 
         # --- 存檔 ---
         conn = get_db_connection()
