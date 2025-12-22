@@ -2,7 +2,6 @@ import os
 import datetime
 import psycopg2
 import requests
-import google.generativeai as genai
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_bcrypt import Bcrypt
@@ -62,53 +61,13 @@ def init_db():
 with app.app_context():
     init_db()
 
-# ================= 🤖 AI 自動偵測核心 (關鍵修改) =================
+# ================= 🚀 強制指定模型 (不自動偵測) =================
 
 GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY')
-CURRENT_MODEL_NAME = None # 會自動填入
 
-def find_best_model():
-    """自動詢問 Google 有哪些模型可用，並挑選一個最好的"""
-    global CURRENT_MODEL_NAME
-    if not GOOGLE_API_KEY:
-        print("❌ 沒有設定 GOOGLE_API_KEY")
-        return None
-
-    try:
-        genai.configure(api_key=GOOGLE_API_KEY)
-        print("🔍 正在搜尋可用模型...")
-        available_models = []
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
-                available_models.append(m.name)
-                print(f"   - 發現: {m.name}")
-        
-        # 優先順序：Flash > Pro > 其他
-        preferred_order = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-1.0-pro', 'gemini-pro']
-        
-        # 1. 先找有沒有在我們優先名單裡的
-        for pref in preferred_order:
-            for avail in available_models:
-                if pref in avail:
-                    CURRENT_MODEL_NAME = avail # 抓到了！(例如 models/gemini-1.5-flash-001)
-                    print(f"✅ 鎖定最佳模型: {CURRENT_MODEL_NAME}")
-                    return CURRENT_MODEL_NAME
-        
-        # 2. 如果都沒有，就隨便選第一個能用的
-        if available_models:
-            CURRENT_MODEL_NAME = available_models[0]
-            print(f"⚠️ 無法找到優先模型，將使用: {CURRENT_MODEL_NAME}")
-            return CURRENT_MODEL_NAME
-            
-        print("❌ 找不到任何可用模型！")
-        return None
-
-    except Exception as e:
-        print(f"❌ 模型偵測失敗: {e}")
-        return None
-
-# 啟動時執行偵測
-find_best_model()
+# 直接寫死目前最穩定、額度最高的模型
+# 備選名單：如果 Flash 還是不行，可以換成 'gemini-1.5-flash-8b'
+TARGET_MODEL = "models/gemini-1.5-flash"
 
 # ==============================================================
 
@@ -188,26 +147,14 @@ def add_dream():
         is_anon = data.get('is_anonymous', False)
         date_str = datetime.datetime.now().strftime("%Y-%m-%d")
 
-        # --- AI 分析 (使用自動偵測到的模型) ---
-        analysis_text = "AI 分析失敗"
+        # --- AI 分析 (REST API 直連) ---
+        analysis_text = "AI 忙線中 (額度已滿或連線錯誤)"
         keywords = ["未分析"]
 
-        if not CURRENT_MODEL_NAME:
-            # 如果還沒有模型，再試著找一次
-            find_best_model()
-
-        if CURRENT_MODEL_NAME and GOOGLE_API_KEY:
+        if GOOGLE_API_KEY:
             try:
-                # 這裡最關鍵：直接使用自動抓到的 CURRENT_MODEL_NAME
-                # 格式通常是 models/gemini-1.5-flash-001，我們需要把 models/ 去掉或保留視 API 而定
-                # v1beta REST API 的格式是 models/{model_id}:generateContent
-                
-                # 如果 CURRENT_MODEL_NAME 已經包含 'models/'，那 URL 只要接上去就好
-                target_model = CURRENT_MODEL_NAME 
-                if not target_model.startswith('models/'):
-                    target_model = f"models/{target_model}"
-
-                api_url = f"https://generativelanguage.googleapis.com/v1beta/{target_model}:generateContent?key={GOOGLE_API_KEY}"
+                # 這裡直接使用 gemini-1.5-flash，不使用 auto-detect
+                api_url = f"https://generativelanguage.googleapis.com/v1beta/{TARGET_MODEL}:generateContent?key={GOOGLE_API_KEY}"
                 
                 payload = {"contents": [{"parts": [{"text": f"分析夢境：{content}。給予簡短心理建議(50字內)與3個關鍵字。格式：建議|關鍵字1,關鍵字2"}]}]}
                 
@@ -220,18 +167,21 @@ def add_dream():
                         parts = text.split('|')
                         analysis_text = parts[0].strip()
                         if len(parts) > 1: keywords = [k.strip() for k in parts[1].split(',')]
+                elif resp.status_code == 429:
+                     analysis_text = "AI 額度用盡 (請換 API Key 或等待)"
+                     print("❌ 429 Too Many Requests: 今天的額度用完了")
+                elif resp.status_code == 404:
+                     analysis_text = "AI 模型未找到 (404)"
+                     print(f"❌ 404 Not Found: 無法找到模型 {TARGET_MODEL}")
                 else:
                     print(f"⚠️ API Error {resp.status_code}: {resp.text}")
                     analysis_text = f"AI 連線錯誤 ({resp.status_code})"
-                    # 如果 404，可能是模型名稱有問題，嘗試強制使用 gemini-pro 備用
-                    if resp.status_code == 404:
-                         analysis_text += " (找不到模型)"
 
             except Exception as e:
                 print(f"AI Critical Error: {e}")
                 analysis_text = "AI 系統錯誤"
         else:
-            analysis_text = "AI 未設定 (找不到可用模型)"
+            analysis_text = "AI 未設定 (無 API Key)"
 
         # --- 存檔 ---
         conn = get_db_connection()
