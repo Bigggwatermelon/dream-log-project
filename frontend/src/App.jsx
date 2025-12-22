@@ -2,28 +2,29 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Line } from 'react-chartjs-2';
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend } from 'chart.js';
-import { BookOpen, PenTool, Activity, Users, LogIn, Lock, Globe, User } from 'lucide-react';
+// ✨ 引入垃圾桶 (Trash2) 和 愛心 (Heart) 圖示
+import { BookOpen, PenTool, Activity, Users, LogIn, Lock, Globe, User, Trash2, Heart } from 'lucide-react';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend);
 
-// 設定 API 網址 (自動切換本地或雲端)
 const API_URL = 'https://dream-backend-dinx.onrender.com/api'; 
 
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem('token'));
   const [user, setUser] = useState(localStorage.getItem('username'));
-  const [view, setView] = useState('home'); // home, login, register, dashboard, library
+  const [view, setView] = useState('home'); 
   
-  // 資料狀態
   const [dreams, setDreams] = useState([]);
   const [libraryDreams, setLibraryDreams] = useState([]);
-  const [expandedId, setExpandedId] = useState(null); // ✨ 新增：用來記錄圖書館中哪個夢境被展開了
+  const [expandedId, setExpandedId] = useState(null);
   
-  // 表單狀態
+  // ✨ 新增：圖書館是否只顯示收藏
+  const [showSavedOnly, setShowSavedOnly] = useState(false);
+
   const [form, setForm] = useState({ content: '', mood: 3, reality: '', isPublic: false, isAnon: false });
   const [authForm, setAuthForm] = useState({ username: '', password: '' });
 
-  // 1. 登入/註冊處理
+  // 1. 登入/註冊
   const handleAuth = async (type) => {
     try {
       const res = await axios.post(`${API_URL}/${type}`, authForm);
@@ -50,65 +51,68 @@ export default function App() {
     setView('home');
   };
 
-  // 2. 抓取夢境 (個人或圖書館)
+  // 2. 抓取資料 (支援 saved 模式)
   const fetchDreams = async (mode, currentToken = token) => {
     try {
-      const config = mode === 'personal' ? { headers: { Authorization: `Bearer ${currentToken}` } } : {};
-      const res = await axios.get(`${API_URL}/dreams?mode=${mode}`, config);
+      // 如果要看收藏，mode 就傳 'saved'，否則傳 'library' 或 'personal'
+      const actualMode = (mode === 'library' && showSavedOnly) ? 'saved' : mode;
+      
+      const config = currentToken ? { headers: { Authorization: `Bearer ${currentToken}` } } : {};
+      const res = await axios.get(`${API_URL}/dreams?mode=${actualMode}`, config);
+      
       if (mode === 'personal') setDreams(res.data);
       else setLibraryDreams(res.data);
     } catch (e) { console.error(e); }
   };
 
-  // 3. 新增夢境 (除錯版)
+  // 3. 新增夢境
   const handleSubmit = async (e) => {
     e.preventDefault();
-    console.log("準備發送 Token:", token);
-    if (!token) {
-        alert("❌ 錯誤：沒有 Token！請先登入。");
-        return;
-    }
-
+    if (!token) return alert("請先登入");
     try {
-      const res = await axios.post(`${API_URL}/dreams`, {
-        content: form.content,
-        mood_level: form.mood,
-        reality_context: form.reality,
-        is_public: form.isPublic,
-        is_anonymous: form.isAnon
-      }, { 
-        headers: { 
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json' 
-        } 
-      });
+      await axios.post(`${API_URL}/dreams`, {
+        content: form.content, mood_level: form.mood, reality_context: form.reality,
+        is_public: form.isPublic, is_anonymous: form.isAnon
+      }, { headers: { 'Authorization': `Bearer ${token}` } });
       
       setForm({ content: '', mood: 3, reality: '', isPublic: false, isAnon: false });
-      alert("✅ 成功：" + (res.data.msg || "AI 解析完成並存檔！"));
+      alert("✅ 存檔成功！");
       fetchDreams('personal');
-      
-    } catch (e) { 
-        const errorMsg = e.response?.data?.msg || e.message;
-        alert("❌ 儲存失敗：" + errorMsg); 
-    }
+    } catch (e) { alert("❌ 失敗：" + (e.response?.data?.msg || e.message)); }
   };
 
-  // 初始載入
-  useEffect(() => {
-    if (token) {
-      fetchDreams('personal');
-      setView('dashboard');
-    }
-  }, []);
+  // 4. ✨ 新增：刪除夢境
+  const handleDelete = async (id) => {
+    if (!window.confirm("確定要刪除這篇日記嗎？(刪除後無法復原)")) return;
+    try {
+      await axios.delete(`${API_URL}/dreams/${id}`, { headers: { Authorization: `Bearer ${token}` } });
+      alert("已刪除");
+      fetchDreams('personal'); // 重新整理列表
+    } catch (e) { alert("刪除失敗"); }
+  };
+
+  // 5. ✨ 新增：收藏/取消收藏
+  const toggleSave = async (id) => {
+    if (!token) return alert("請先登入才能收藏！");
+    try {
+      const res = await axios.post(`${API_URL}/dreams/${id}/save`, {}, { headers: { Authorization: `Bearer ${token}` } });
+      // 直接在前端更新按鈕狀態，不用重新整理整個頁面 (UX 比較好)
+      setLibraryDreams(prev => prev.map(d => d.id === id ? { ...d, is_saved: res.data.is_saved } : d));
+    } catch (e) { alert("操作失敗"); }
+  };
 
   useEffect(() => {
+    if (token) { fetchDreams('personal'); setView('dashboard'); }
+  }, []);
+
+  // 當切換到圖書館，或切換「只看收藏」時，重新抓資料
+  useEffect(() => {
     if (view === 'library') fetchDreams('library');
-  }, [view]);
+  }, [view, showSavedOnly]);
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 font-sans p-4 md:p-8">
       <div className="max-w-6xl mx-auto">
-        {/* 導覽列 */}
         <nav className="flex justify-between items-center mb-8 bg-slate-800 p-4 rounded-2xl border border-slate-700 shadow-lg">
           <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-purple-400 to-pink-400 flex items-center gap-2">
             <BookOpen className="text-purple-400"/> Dream Log
@@ -130,7 +134,6 @@ export default function App() {
           </div>
         </nav>
 
-        {/* 1. 登入註冊頁面 */}
         {['home', 'login', 'register'].includes(view) && !token && (
           <div className="max-w-md mx-auto mt-20 bg-slate-800 p-8 rounded-3xl border border-slate-700 shadow-2xl">
             {view === 'home' && (
@@ -159,7 +162,7 @@ export default function App() {
           </div>
         )}
 
-        {/* 2. 個人儀表板 */}
+        {/* 個人儀表板 */}
         {view === 'dashboard' && token && (
           <div className="grid md:grid-cols-3 gap-8">
             <div className="md:col-span-1 bg-slate-800 p-6 rounded-3xl border border-slate-700 h-fit">
@@ -193,10 +196,16 @@ export default function App() {
               </div>
               <div className="space-y-4">
                 {dreams.map(d => (
-                  <div key={d.id} className="bg-slate-800 p-5 rounded-2xl border border-slate-700">
+                  <div key={d.id} className="bg-slate-800 p-5 rounded-2xl border border-slate-700 relative group">
                     <div className="flex justify-between mb-2">
                        <span className="text-xs text-slate-400">{d.date}</span>
-                       <span className={`text-xs px-2 py-1 rounded ${d.mood_level>=3?'bg-green-900/50 text-green-300':'bg-red-900/50 text-red-300'}`}>Mood: {d.mood_level}</span>
+                       <div className="flex items-center gap-3">
+                         <span className={`text-xs px-2 py-1 rounded ${d.mood_level>=3?'bg-green-900/50 text-green-300':'bg-red-900/50 text-red-300'}`}>Mood: {d.mood_level}</span>
+                         {/* ✨ 垃圾桶按鈕 (點擊刪除) */}
+                         <button onClick={() => handleDelete(d.id)} className="text-slate-500 hover:text-red-400 transition-colors" title="刪除日記">
+                           <Trash2 size={16} />
+                         </button>
+                       </div>
                     </div>
                     <p className="mb-3 text-lg">{d.content}</p>
                     <div className="bg-slate-700/30 p-3 rounded-lg text-sm text-purple-200 border-l-4 border-purple-500">🤖 {d.analysis}</div>
@@ -207,33 +216,61 @@ export default function App() {
           </div>
         )}
 
-        {/* 3. 夢境圖書館 ✨ 更新部分 */}
+        {/* 夢境圖書館 */}
         {view === 'library' && (
           <div>
-            <div className="text-center mb-10">
+            <div className="text-center mb-6">
               <h2 className="text-3xl font-bold mb-2 flex items-center justify-center gap-3"><Globe className="text-pink-500"/> 夢境圖書館</h2>
-              <p className="text-slate-400">窺探他人的潛意識，發現你並不孤單。</p>
+              <p className="text-slate-400 mb-4">窺探他人的潛意識，發現你並不孤單。</p>
+              
+              {/* ✨ 收藏篩選開關 */}
+              {token && (
+                <div className="flex justify-center gap-2">
+                  <button 
+                    onClick={() => setShowSavedOnly(false)} 
+                    className={`px-3 py-1 rounded-full text-sm ${!showSavedOnly ? 'bg-pink-600 text-white' : 'bg-slate-700 text-slate-400 hover:bg-slate-600'}`}>
+                    全部
+                  </button>
+                  <button 
+                    onClick={() => setShowSavedOnly(true)} 
+                    className={`px-3 py-1 rounded-full text-sm flex items-center gap-1 ${showSavedOnly ? 'bg-pink-600 text-white' : 'bg-slate-700 text-slate-400 hover:bg-slate-600'}`}>
+                    <Heart size={12} fill="currentColor"/> 只看收藏
+                  </button>
+                </div>
+              )}
             </div>
+
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {libraryDreams.length === 0 && (
+                <div className="col-span-full text-center text-slate-500 py-10">
+                  {showSavedOnly ? "你還沒有收藏任何夢境喔！" : "目前圖書館空空如也..."}
+                </div>
+              )}
               {libraryDreams.map(d => (
-                <div key={d.id} className="bg-slate-800 p-6 rounded-2xl border border-slate-700 shadow-lg flex flex-col">
+                <div key={d.id} className="bg-slate-800 p-6 rounded-2xl border border-slate-700 shadow-lg flex flex-col relative group">
                   <div className="flex items-center gap-2 mb-4 pb-3 border-b border-slate-700">
                     <div className="bg-slate-700 p-2 rounded-full"><User size={16}/></div>
                     <span className="font-bold text-slate-300">{d.author}</span>
                     <span className="ml-auto text-xs text-slate-500">{d.date}</span>
+                    
+                    {/* ✨ 收藏按鈕 (愛心) */}
+                    {token && (
+                      <button 
+                        onClick={() => toggleSave(d.id)}
+                        className={`ml-2 p-1 rounded-full transition-all ${d.is_saved ? 'text-pink-500 hover:bg-pink-900/20' : 'text-slate-600 hover:text-pink-400 hover:bg-slate-700'}`}
+                        title={d.is_saved ? "取消收藏" : "加入收藏"}
+                      >
+                        <Heart size={18} fill={d.is_saved ? "currentColor" : "none"} />
+                      </button>
+                    )}
                   </div>
                   
-                  {/* ✨ 文字內容：根據狀態切換 line-clamp-3 (只顯示三行) 或展開 */}
                   <p className={`text-slate-200 mb-2 leading-relaxed ${expandedId === d.id ? '' : 'line-clamp-3'}`}>
                     {d.content}
                   </p>
 
-                  {/* ✨ 如果字數夠多，才顯示「閱讀全文」按鈕 */}
                   {d.content.length > 50 && (
-                    <button 
-                      onClick={() => setExpandedId(expandedId === d.id ? null : d.id)}
-                      className="text-pink-400 hover:text-pink-300 text-sm font-medium mb-4 text-left"
-                    >
+                    <button onClick={() => setExpandedId(expandedId === d.id ? null : d.id)} className="text-pink-400 hover:text-pink-300 text-sm font-medium mb-4 text-left">
                       {expandedId === d.id ? "收起全文 ↑" : "閱讀全文 ..."}
                     </button>
                   )}

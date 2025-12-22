@@ -1,7 +1,7 @@
 import os
 import datetime
 import psycopg2
-import random  # 引入隨機模組來模擬 AI
+import random
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_bcrypt import Bcrypt
@@ -24,12 +24,13 @@ def get_db_connection():
         print(f"❌ DB Error: {e}")
         return None
 
-# --- 初始化資料庫 ---
+# --- 初始化資料庫 (升級版：新增收藏表) ---
 def init_db():
     conn = get_db_connection()
     if conn:
         try:
             cur = conn.cursor()
+            # 1. 使用者表
             cur.execute('''
                 CREATE TABLE IF NOT EXISTS users (
                     id SERIAL PRIMARY KEY,
@@ -37,10 +38,11 @@ def init_db():
                     password TEXT NOT NULL
                 );
             ''')
+            # 2. 夢境表
             cur.execute('''
                 CREATE TABLE IF NOT EXISTS dreams (
                     id SERIAL PRIMARY KEY,
-                    user_id INTEGER REFERENCES users(id),
+                    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
                     date TEXT,
                     content TEXT,
                     mood_level INTEGER,
@@ -49,6 +51,14 @@ def init_db():
                     reality_context TEXT,
                     is_public BOOLEAN DEFAULT FALSE,
                     is_anonymous BOOLEAN DEFAULT FALSE
+                );
+            ''')
+            # 3. ✨ 新增：收藏表 (多對多關係)
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS saved_dreams (
+                    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                    dream_id INTEGER REFERENCES dreams(id) ON DELETE CASCADE,
+                    PRIMARY KEY (user_id, dream_id)
                 );
             ''')
             conn.commit()
@@ -61,53 +71,28 @@ def init_db():
 with app.app_context():
     init_db()
 
-# ================= 🎭 模擬 AI 分析 (偽裝術) =================
+# --- 首頁 ---
+@app.route('/')
+def home():
+    return "✅ Dream Log 後端運作中！(Backend is running)"
 
+# --- 模擬 AI 分析 ---
 def mock_ai_analysis(content):
-    """
-    這不是真的 AI，而是隨機挑選心理學術語。
-    但在 Demo 時看起來會很像真的有在分析。
-    """
-    
-    # 1. 隨機關鍵字庫
-    keyword_pool = [
-        "潛意識焦慮", "自我成長", "童年陰影", "渴望自由", "人際壓力", 
-        "內在小孩", "情緒釋放", "未知恐懼", "安全感缺失", "創傷修復",
-        "生活變動", "過度壓抑", "情感投射", "自我探索", "靈性覺醒"
-    ]
-    
-    # 2. 隨機分析建議庫
+    keyword_pool = ["潛意識焦慮", "自我成長", "童年陰影", "渴望自由", "人際壓力", "內在小孩", "情緒釋放", "未知恐懼", "安全感缺失", "創傷修復"]
     advice_pool = [
         "這個夢境反映了你近期內心的波動，建議多給自己一些獨處的時間。",
         "夢中的場景象徵著你對現狀的不確定感，試著放下控制欲，順其自然。",
         "這是一個釋放壓力的夢，代表你的潛意識正在自我修復，請保持樂觀。",
-        "夢境顯示你可能忽略了某些真實感受，建議找朋友聊聊，抒發情緒。",
-        "或許你在逃避某個決定？這個夢在提醒你勇敢面對內心的聲音。",
-        "非常有趣的夢！象徵著創造力與突破，近期可能會有新的靈感出現。",
-        "這反映了你對未來的期待與擔憂，請相信自己的能力，一切會好轉的。"
+        "夢境顯示你可能忽略了某些真實感受，建議找朋友聊聊，抒發情緒。"
     ]
-
-    # 3. 隨機挑選 3 個關鍵字 + 1 句建議
     selected_keywords = random.sample(keyword_pool, 3)
     selected_advice = random.choice(advice_pool)
-    
-    # 為了讓它更像真的，如果內容很短，就加一句話
-    if len(content) < 10:
-        selected_advice = "夢境內容較短，可能象徵著直覺的閃現。" + selected_advice
-
+    if len(content) < 10: selected_advice = "夢境內容較短，可能象徵著直覺的閃現。" + selected_advice
     return selected_advice, selected_keywords
 
-# ==============================================================
-
-# --- JWT 錯誤處理 ---
-@jwt.invalid_token_loader
-def invalid_token_callback(error): return jsonify({"msg": f"無效的 Token: {error}"}), 422
-@jwt.unauthorized_loader
-def missing_token_callback(error): return jsonify({"msg": "缺少 Token"}), 401
-@jwt.expired_token_loader
-def expired_token_callback(jwt_header, jwt_payload): return jsonify({"msg": "Token 已過期"}), 401
-
 # --- API 路由 ---
+
+# 1. 註冊
 @app.route('/api/register', methods=['POST'])
 def register():
     data = request.json
@@ -126,6 +111,7 @@ def register():
     finally:
         cur.close(); conn.close()
 
+# 2. 登入
 @app.route('/api/login', methods=['POST'])
 def login():
     data = request.json
@@ -139,29 +125,68 @@ def login():
         return jsonify(access_token=create_access_token(identity=str(user[0])), username=user[1]), 200
     return jsonify({"msg": "帳號或密碼錯誤"}), 401
 
+# 3. 獲取夢境 (更新版：包含收藏狀態)
 @app.route('/api/dreams', methods=['GET'])
 @jwt_required(optional=True)
 def get_dreams():
     mode = request.args.get('mode', 'personal')
-    uid = get_jwt_identity()
+    uid = get_jwt_identity() # 當前登入的使用者 ID
     conn = get_db_connection()
     cur = conn.cursor()
+
     if mode == 'library':
-        cur.execute("SELECT d.id, d.date, d.content, d.mood_level, d.analysis, d.keywords, d.reality_context, d.is_anonymous, u.username FROM dreams d JOIN users u ON d.user_id = u.id WHERE d.is_public = TRUE ORDER BY d.id DESC LIMIT 50")
-    else:
+        # ✨ 複雜查詢：同時檢查這篇夢境有沒有被「這個人(uid)」收藏
+        query = """
+            SELECT d.id, d.date, d.content, d.mood_level, d.analysis, d.keywords, d.reality_context, d.is_anonymous, u.username,
+            CASE WHEN s.user_id IS NOT NULL THEN TRUE ELSE FALSE END as is_saved
+            FROM dreams d 
+            JOIN users u ON d.user_id = u.id
+            LEFT JOIN saved_dreams s ON d.id = s.dream_id AND s.user_id = %s
+            WHERE d.is_public = TRUE 
+            ORDER BY d.id DESC LIMIT 50
+        """
+        # 如果使用者沒登入，uid 會是 None，SQL 也能正常運作 (is_saved 會是 False)
+        cur.execute(query, (uid if uid else -1,))
+        
+    elif mode == 'saved':
+        # ✨ 新模式：只抓取我收藏的夢
+        if not uid: return jsonify({"msg": "請先登入"}), 401
+        query = """
+            SELECT d.id, d.date, d.content, d.mood_level, d.analysis, d.keywords, d.reality_context, d.is_anonymous, u.username,
+            TRUE as is_saved
+            FROM dreams d 
+            JOIN users u ON d.user_id = u.id
+            JOIN saved_dreams s ON d.id = s.dream_id
+            WHERE s.user_id = %s
+            ORDER BY s.dream_id DESC
+        """
+        cur.execute(query, (uid,))
+
+    else: # personal
         if not uid: return jsonify({"msg": "請先登入"}), 401
         cur.execute("SELECT * FROM dreams WHERE user_id = %s ORDER BY id DESC", (uid,))
+
     rows = cur.fetchall()
     cur.close(); conn.close()
     
     dreams = []
     for r in rows:
-        if mode == 'library':
-            dreams.append({'id':r[0], 'date':r[1], 'content':r[2], 'mood_level':r[3], 'analysis':r[4], 'keywords':r[5], 'reality_context':r[6], 'author':"匿名" if r[7] else r[8]})
+        if mode == 'library' or mode == 'saved':
+            dreams.append({
+                'id':r[0], 'date':r[1], 'content':r[2], 'mood_level':r[3], 
+                'analysis':r[4], 'keywords':r[5], 'reality_context':r[6], 
+                'author':"匿名" if r[7] else r[8],
+                'is_saved': r[9] # ✨ 回傳有沒有收藏
+            })
         else:
-            dreams.append({'id':r[0], 'user_id':r[1], 'date':r[2], 'content':r[3], 'mood_level':r[4], 'analysis':r[5], 'keywords':r[6], 'reality_context':r[7], 'is_public':r[8], 'is_anonymous':r[9]})
+            dreams.append({
+                'id':r[0], 'user_id':r[1], 'date':r[2], 'content':r[3], 
+                'mood_level':r[4], 'analysis':r[5], 'keywords':r[6], 
+                'reality_context':r[7], 'is_public':r[8], 'is_anonymous':r[9]
+            })
     return jsonify(dreams)
 
+# 4. 新增夢境
 @app.route('/api/dreams', methods=['POST'])
 @jwt_required()
 def add_dream():
@@ -174,11 +199,7 @@ def add_dream():
         is_pub = data.get('is_public', False)
         is_anon = data.get('is_anonymous', False)
         date_str = datetime.datetime.now().strftime("%Y-%m-%d")
-
-        # --- ⚡️ 使用模擬 AI (秒回，不報錯) ---
         analysis_text, keywords = mock_ai_analysis(content)
-
-        # --- 存檔 ---
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("INSERT INTO dreams (user_id, date, content, mood_level, analysis, keywords, reality_context, is_public, is_anonymous) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id", 
@@ -186,10 +207,53 @@ def add_dream():
         new_id = cur.fetchone()[0]
         conn.commit(); cur.close(); conn.close()
         return jsonify({"msg": "儲存成功", "id": new_id}), 201
-
     except Exception as e:
-        print(f"Server Error: {e}")
         return jsonify({"msg": f"伺服器錯誤: {str(e)}"}), 500
+
+# 5. ✨ 新增：刪除夢境
+@app.route('/api/dreams/<int:dream_id>', methods=['DELETE'])
+@jwt_required()
+def delete_dream(dream_id):
+    user_id = get_jwt_identity()
+    conn = get_db_connection()
+    cur = conn.cursor()
+    # 先檢查是不是這個人寫的
+    cur.execute("SELECT user_id FROM dreams WHERE id = %s", (dream_id,))
+    dream = cur.fetchone()
+    if not dream:
+        return jsonify({"msg": "找不到該紀錄"}), 404
+    if str(dream[0]) != str(user_id):
+        return jsonify({"msg": "你沒有權限刪除這篇日記"}), 403
+    
+    cur.execute("DELETE FROM dreams WHERE id = %s", (dream_id,))
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({"msg": "刪除成功"}), 200
+
+# 6. ✨ 新增：切換收藏 (按愛心)
+@app.route('/api/dreams/<int:dream_id>/save', methods=['POST'])
+@jwt_required()
+def toggle_save_dream(dream_id):
+    user_id = get_jwt_identity()
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    # 檢查是否已經收藏
+    cur.execute("SELECT * FROM saved_dreams WHERE user_id = %s AND dream_id = %s", (user_id, dream_id))
+    existing = cur.fetchone()
+    
+    if existing:
+        # 已收藏 -> 取消收藏
+        cur.execute("DELETE FROM saved_dreams WHERE user_id = %s AND dream_id = %s", (user_id, dream_id))
+        msg = "已取消收藏"
+        is_saved = False
+    else:
+        # 未收藏 -> 新增收藏
+        cur.execute("INSERT INTO saved_dreams (user_id, dream_id) VALUES (%s, %s)", (user_id, dream_id))
+        msg = "已加入收藏"
+        is_saved = True
+        
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({"msg": msg, "is_saved": is_saved}), 200
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
