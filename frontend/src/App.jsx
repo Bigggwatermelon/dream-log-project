@@ -35,7 +35,8 @@ import {
   Zap,
   Presentation,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  ExternalLink
 } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval, isSameMonth, isSameDay, addMonths, subMonths } from 'date-fns';
 
@@ -68,7 +69,6 @@ const SimpleTagCloud = ({ tags, minSize, maxSize }) => {
   return (
     <div className="flex flex-wrap justify-center items-center gap-4 p-4">
       {tags.map((tag, idx) => {
-        // 根據次數計算大小
         const size = tags.length > 1 && maxCount !== minCount 
           ? minSize + ((tag.count - minCount) / (maxCount - minCount)) * (maxSize - minSize)
           : (minSize + maxSize) / 2;
@@ -150,7 +150,7 @@ const DEMO_DATA = [
   { content: "我夢到我在考試，可是試卷上的字我都看不懂，時間快到了，我非常焦慮，一直在流汗。", mood: 1, reality: "最近期末考壓力大" },
   { content: "我夢見我變成了一隻鳥，在天空飛翔，下面的大海非常藍，感覺超級自由，完全沒有煩惱。", mood: 5, reality: "剛看完一部旅遊電影" },
   { content: "夢到被一隻巨大的黑狗追，我一直跑一直跑，最後躲進一個洞穴裡，裡面有一條蛇。", mood: 2, reality: "昨天被老闆罵" },
-  { content: "夢到過世的奶奶煮飯給我吃，味道很懷念，醒來時眼角有淚。", mood: 3, reality: "中秋節快到了" },
+  { content: "夢到過世的奶奶煮飯給我吃，味道很懷念，我們聊了很多小時候的事情，醒來時眼角有淚。", mood: 3, reality: "中秋節快到了" },
   { content: "夢到我在海邊撿貝殼，突然海水漲潮，我差點被淹沒，這時候有一隻貓把我叫醒了。", mood: 4, reality: "想去海邊玩" }
 ];
 
@@ -303,14 +303,14 @@ export default function App() {
                 <h2 className="text-4xl font-bold mb-4">探索潛意識</h2>
                 <p className="text-slate-400 mb-8">結合心理學分析與數據可視化的夢境日記。</p>
                 
-                {/* ✨ 顯眼的簡報連結按鈕 */}
+                {/* ✨ 更新後的 Google 簡報連結連結按鈕 */}
                 <a 
-                  href="./dream_log_final_presentation.html" 
+                  href="https://docs.google.com/presentation/d/1iNGPdZFNfCoRFoHKdkBHNxlMu-1y_0h57lr93nsgUY0/edit?usp=sharing" 
                   target="_blank" 
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 w-full bg-slate-700 hover:bg-slate-600 text-purple-300 py-3 rounded-xl font-bold text-lg mb-4 transition-all border border-purple-500/30 justify-center group"
+                  className="inline-flex items-center gap-2 w-full bg-slate-700 hover:bg-slate-600 text-purple-300 py-3 rounded-xl font-bold text-lg mb-4 transition-all border border-purple-500/30 justify-center group shadow-lg shadow-purple-500/10"
                 >
-                  <Presentation className="group-hover:scale-110 transition-transform" /> 專案展示簡報 (期末報告)
+                  <Presentation className="group-hover:rotate-12 transition-transform" /> 專案展示簡報 <ExternalLink size={16} className="opacity-50" />
                 </a>
 
                 <button onClick={() => setView('register')} className="w-full bg-gradient-to-r from-purple-600 to-pink-600 py-3 rounded-xl font-bold text-lg mb-4 shadow-lg">開始註冊</button>
