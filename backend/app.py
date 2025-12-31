@@ -8,6 +8,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_bcrypt import Bcrypt
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
+from transformers import pipeline
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
@@ -16,6 +17,17 @@ app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'my-fixed-secret
 bcrypt = Bcrypt(app)
 jwt = JWTManager(app)
 DATABASE_URL = os.environ.get('DATABASE_URL')
+
+# ================= 🤖 AI 語言模型初始化 =================
+# 使用多語言情緒分析模型 (支援中文語意理解)
+try:
+    # 第一次執行會自動下載模型，約需數百 MB 空間
+    model_name = "lxyuan/distilbert-base-multilingual-cased-sentiments-student"
+    analyzer = pipeline("sentiment-analysis", model=model_name)
+    print("✅ AI 語言模型已載入")
+except Exception as e:
+    print(f"❌ 模型載入失敗: {e}")
+    analyzer = None
 
 def get_db_connection():
     try: return psycopg2.connect(DATABASE_URL)
@@ -32,104 +44,62 @@ def init_db():
 
 with app.app_context(): init_db()
 
-# ================= 🧠 超級心理學字典 (Rule-based Engine) =================
-# 這裡擴充了關鍵字庫，讓它能捕捉更多情境
-SYMBOL_DB = {
-    "蛇": "性、恐懼、或潛意識的轉化力量。",
-    "牙齒": "對外貌的焦慮，或擔心失去力量與控制權。",
-    "掉牙": "象徵成長的陣痛，或對衰老的恐懼。",
-    "飛": "渴望自由，超越現狀，或是想逃避壓力。",
-    "墜落": "生活失控感，對失敗的恐懼，或缺乏安全感。",
-    "被追": "在逃避某個責任、情感或過去的陰影。",
-    "水": "情緒的象徵。清澈代表平靜，混濁代表混亂。",
-    "火": "強烈的憤怒、熱情，或毀滅與重生的力量。",
-    "死": "象徵結束與新的開始，不一定代表真正的死亡。",
-    "考試": "自我懷疑，擔心被評價，或準備不足的焦慮。",
-    "迷路": "人生方向的迷惘，失去了目標或依靠。",
-    "貓": "直覺、陰柔面、獨立或神秘感。",
-    "狗": "忠誠、友情，或對保護與被愛的渴望。",
-    "車": "人生旅程的控制權。煞車失靈代表失控。",
-    "前任": "未解的心結，或懷念過去的某個自己。",
-    "遲到": "錯失良機的恐懼，或對時間管理的壓力。",
-    "裸體": "脆弱、羞恥感，或渴望展現真實的自己。",
-    "電梯": "情緒的升降，或社會地位的變化。",
-    "廁所": "渴望釋放負面情緒，或尋求隱私。",
-    "錢": "自我價值感，或對資源匱乏的恐懼。",
-    "下雨": "憂鬱釋放，洗滌心靈，或情緒的宣洩。",
-    "大海": "深層潛意識，未知與廣闊的可能性。",
-    "殺人": "壓抑的憤怒，或想要強行切斷某種關係。"
-}
-
-def smart_analysis(content, mood_level):
+# ================= 🧠 AI 深度分析邏輯 =================
+def ai_analysis_engine(content, mood_level):
     """
-    不聯網，但看起來很聰明的分析邏輯
+    透過 NLP 模型取代硬編碼字典
     """
-    found_keywords = []
-    found_meanings = []
-    
-    # 1. 掃描內容是否有字典裡的詞
-    for symbol, meaning in SYMBOL_DB.items():
-        if symbol in content:
-            found_keywords.append(symbol)
-            found_meanings.append(meaning)
-    
-    # 2. 如果真的什麼都沒抓到 (Fallback)
-    if not found_keywords:
-        generic_keywords = ["潛意識", "情緒", "自我"]
-        if mood_level >= 4:
-            analysis_text = "這是一個充滿正能量的夢，代表你近期心態積極，潛意識正在整合美好的經驗。"
-            keywords = ["快樂", "正向", "能量"]
-        elif mood_level <= 2:
-            analysis_text = "夢境反映了內心的不安與壓力，建議多給自己一些喘息空間，照顧內在小孩。"
-            keywords = ["壓力", "釋放", "療癒"]
-        else:
-            analysis_text = "這是一個平靜的整理型夢境，大腦正在消化白天的資訊，象徵著內心的平衡。"
-            keywords = generic_keywords
-    else:
-        # 3. 組合分析文案
-        # 取前3個關鍵字
-        keywords = found_keywords[:3]
-        main_symbol = found_keywords[0]
-        main_meaning = found_meanings[0]
-        
-        intro = f"你在夢中遇見了「{main_symbol}」，這在心理學上通常象徵{main_meaning}"
-        if len(found_keywords) > 1:
-            intro += f" 此外，夢中還出現了{found_keywords[1]}，這暗示著情緒的多層次流動。"
-        
-        analysis_text = intro
+    # 1. AI 情感分析
+    detected_label = "neutral"
+    if analyzer and content.strip():
+        try:
+            # 截斷過長文本以防報錯
+            result = analyzer(content[:512])[0]
+            detected_label = result['label'] # positive, neutral, negative
+        except:
+            pass
 
-    # 4. 計算雷達圖數值 (依據關鍵字屬性微調)
-    # 預設值
+    # 2. 自動關鍵字提取 (利用詞頻抓取重點)
+    # 抓取 2-4 字的中文詞彙
+    words = re.findall(r'[\u4e00-\u9fa5]{2,4}', content)
+    keyword_counts = Counter(words).most_common(3)
+    keywords = [k[0] for k in keyword_counts] if keyword_counts else ["潛意識", "情緒"]
+
+    # 3. 模擬心理學文案生成
+    # 根據 AI 偵測到的情緒標籤，生成對應的心理學觀點
+    analysis_templates = {
+        "positive": f"這個夢境展現了積極的心理補償機制。夢中的「{keywords[0]}」象徵著你內在資源的整合，這代表你目前具備強大的情緒調節能力，正處於一個向上的心理成長期。",
+        "negative": f"夢境中強烈的負面信號可能源自現實生活的壓抑。透過「{keywords[0]}」的隱喻，潛意識正在提醒你注意那些被忽略的壓力點，這是一個心靈自我修復的求救信號。",
+        "neutral": f"這是一個典型的資訊處理型夢境。大腦正在對「{keywords[0]}」相關的記憶進行歸檔與重組，這反映了你內心正在尋求一種理性的平衡與秩序。"
+    }
+    
+    base_text = analysis_templates.get(detected_label, "這是一個充滿象徵意義的夢境，反映了潛意識與現實世界的交互作用。")
+    
+    # 4. 雷達圖數值計算 (基於 AI 情緒標籤動態生成)
     radar = {"joy": 50, "anxiety": 50, "stress": 50, "clarity": 50, "mystic": 50}
     
-    # 根據 mood_level 調整
-    radar["joy"] = mood_level * 20
-    radar["anxiety"] = (6 - mood_level) * 15
+    # 根據心情滑桿與 AI 結果調整
+    radar["joy"] = max(10, min(100, mood_level * 20))
     
-    # 根據關鍵字調整
-    bad_vibes = ["死", "墜落", "被追", "考試", "迷路", "遲到", "蛇", "火"]
-    mystic_vibes = ["飛", "水", "大海", "貓", "死", "火"]
-    
-    hit_bad = sum(1 for k in keywords if k in bad_vibes)
-    hit_mystic = sum(1 for k in keywords if k in mystic_vibes)
-    
-    radar["stress"] += hit_bad * 15
-    radar["anxiety"] += hit_bad * 10
-    radar["mystic"] += hit_mystic * 20
-    radar["clarity"] = random.randint(30, 90) # 清晰度比較隨機
+    if detected_label == "negative":
+        radar["anxiety"] += 25
+        radar["stress"] += 20
+    elif detected_label == "positive":
+        radar["clarity"] += 20
+        radar["joy"] += 15
 
-    # 限制在 0-100
-    for k in radar: radar[k] = max(10, min(100, radar[k]))
-    
-    # 格式化輸出給前端
+    # 加入隨機擾動增加擬真感
+    radar["mystic"] = random.randint(30, 85)
+    radar["clarity"] = max(20, min(100, radar["clarity"] + random.randint(-10, 10)))
+
     radar_str = f"||RADAR:{int(radar['joy'])},{int(radar['anxiety'])},{int(radar['stress'])},{int(radar['clarity'])},{int(radar['mystic'])}"
     
-    return analysis_text + radar_str, keywords
+    return base_text + radar_str, keywords
 
-# =======================================================================
+# ================= 路由處理 =================
 
 @app.route('/')
-def home(): return "Dream Log Smart Backend Running"
+def home(): return "Dream Log AI Backend Running"
 
 @app.route('/api/register', methods=['POST'])
 def register():
@@ -161,7 +131,6 @@ def get_dreams():
     uid = get_jwt_identity()
     conn = get_db_connection(); cur = conn.cursor()
 
-    # ✨ 這裡確保了 personal 模式只看 user_id，不管 is_public
     base_query = """
         SELECT d.id, d.date, d.content, d.mood_level, d.analysis, d.keywords, d.reality_context, d.is_anonymous, u.username,
         CASE WHEN s.user_id IS NOT NULL THEN TRUE ELSE FALSE END as is_saved
@@ -174,7 +143,7 @@ def get_dreams():
 
     if mode == 'personal':
         if not uid: return jsonify({"msg": "請先登入"}), 401
-        conditions.append("d.user_id = %s") # 只要是我寫的，全部抓出來
+        conditions.append("d.user_id = %s")
         params.append(uid)
     elif mode == 'saved':
         if not uid: return jsonify({"msg": "請先登入"}), 401
@@ -182,7 +151,7 @@ def get_dreams():
         conditions.append("s.user_id = %s")
         params.append(uid)
     else: # library
-        conditions.append("d.is_public = TRUE") # 圖書館只看公開的
+        conditions.append("d.is_public = TRUE")
 
     if search:
         conditions.append("(d.content ILIKE %s OR %s = ANY(d.keywords))")
@@ -219,8 +188,8 @@ def add_dream():
         user_id = get_jwt_identity(); data = request.json
         mood = data.get('mood_level', 3)
         
-        # 🔥 使用新的聰明分析
-        analysis_str, keywords = smart_analysis(data['content'], mood)
+        # 使用 AI 引擎生成分析
+        analysis_str, keywords = ai_analysis_engine(data['content'], mood)
         
         conn = get_db_connection(); cur = conn.cursor()
         cur.execute("INSERT INTO dreams (user_id, date, content, mood_level, analysis, keywords, reality_context, is_public, is_anonymous) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id", 
@@ -258,4 +227,5 @@ def clear_user_data():
     return jsonify({"msg": "已清除"}), 200
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    # 這裡可以根據環境調整，本地開發建議用 5000 端口
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
